@@ -290,7 +290,7 @@ html{-webkit-text-size-adjust:100%}
   <div id="drop">
     <div>
       <b>📄 Documentos desta obra</b>
-      <div class="muted" style="font-size:12px">Arraste aqui o <b>PDF da medição paga</b> e a <b>planilha do apontado</b> (.xlsx), ou clique para escolher. Pode entrar mais de um PDF — as parcelas somam. Tudo é lido no navegador; nenhum arquivo sai daqui.</div>
+      <div class="muted" style="font-size:12px">Arraste aqui o <b>PDF da medição paga</b> e a <b>planilha do apontado</b> (.xlsx) — juntos ou um de cada vez, tanto faz o botão: o app reconhece cada arquivo pelo conteúdo. Pode entrar mais de um PDF — as parcelas somam. Tudo é lido no navegador; nenhum arquivo sai daqui.</div>
       <div class="muted" id="fonte" style="font-size:12px;margin-top:4px"></div>
     </div>
     <span style="flex:1"></span>
@@ -298,8 +298,7 @@ html{-webkit-text-size-adjust:100%}
     <button id="btnXls">📊 Apontado (Excel)</button>
     <button class="sec" id="btnLido">🔍 O que foi lido</button>
     <button class="sec perigo" id="btnLimpar">🗑️ Limpar</button>
-    <input type="file" id="arqPdf" accept=".pdf" multiple hidden>
-    <input type="file" id="arqXls" accept=".xlsx,.xls" hidden>
+    <input type="file" id="arq" accept=".pdf,.xlsx,.xls" multiple hidden>
   </div>
 
   <pre id="bruto" hidden></pre>
@@ -919,15 +918,37 @@ function atualizarFonte(){
   PAGOS.forEach(p=>partes.push(`📄 ${esc(p.arquivo)} — ${p.itens.length} serviços · ${brl(p.totais.pagar)}`));
   $("fonte").innerHTML=partes.join("<br>")||"nenhum arquivo carregado ainda";
 }
+/* o tipo vem da assinatura do arquivo; a extensão é só o palpite inicial.
+   "%PDF" = medição paga · "PK" = xlsx · "ÐÏ" (D0CF11E0) = Excel antigo, que não abre aqui */
+async function tipoDoArquivo(a){
+  let assin="";
+  try{
+    const b=new Uint8Array(await a.slice(0,8).arrayBuffer());
+    const hex=[...b].map(x=>x.toString(16).padStart(2,"0")).join("");
+    if(hex.startsWith("25504446")) assin="pdf";
+    else if(hex.startsWith("504b0304")) assin="xlsx";
+    else if(hex.startsWith("d0cf11e0")) assin="xls-antigo";
+  }catch(e){}
+  if(assin) return assin;
+  if(/\.pdf$/i.test(a.name)) return "pdf";
+  if(/\.xlsx$/i.test(a.name)) return "xlsx";
+  if(/\.xls$/i.test(a.name)) return "xls-antigo";
+  return "";
+}
 async function receber(arqs){
   for(const a of arqs){
     $("fonte").innerHTML=`lendo <b>${esc(a.name)}</b>…`;
     try{
-      if(/\.pdf$/i.test(a.name)){
+      const tipo=await tipoDoArquivo(a);
+      if(tipo==="pdf"){
         const r=await lerPDF(a);
         PAGOS=PAGOS.filter(p=>p.arquivo!==r.arquivo).concat([r]);
-      }else if(/\.xlsx?$/i.test(a.name)){
+      }else if(tipo==="xlsx"){
         APONT=await lerXLSX(a);
+      }else if(tipo==="xls-antigo"){
+        throw new Error("este Excel está no formato antigo (.xls). Abra no Excel e salve como .xlsx");
+      }else{
+        throw new Error("não reconheci o arquivo — mande o PDF da medição ou o .xlsx do fechamento");
       }
     }catch(e){
       atualizarFonte();
@@ -937,12 +958,14 @@ async function receber(arqs){
   }
   atualizarFonte(); render();
 }
-$("btnPdf").onclick=()=>$("arqPdf").click();
-$("btnXls").onclick=()=>$("arqXls").click();
-$("arqPdf").onchange=e=>{receber([...e.target.files]);e.target.value=""};
-$("arqXls").onchange=e=>{receber([...e.target.files]);e.target.value=""};
+/* um campo só para os dois documentos: o tipo é decidido pelo arquivo, não pelo
+   botão em que se clicou — antes, clicar fora dos botões abria só o filtro de PDF */
+function escolher(accept){ const i=$("arq"); i.accept=accept; i.click() }
+$("btnPdf").onclick=e=>{e.stopPropagation(); escolher(".pdf,.xlsx,.xls")};
+$("btnXls").onclick=e=>{e.stopPropagation(); escolher(".xlsx,.xls,.pdf")};
+$("arq").onchange=e=>{receber([...e.target.files]);e.target.value=""};
 const drop=$("drop");
-drop.onclick=e=>{ if(e.target.tagName!=="BUTTON") $("arqPdf").click() };
+drop.onclick=e=>{ if(e.target.tagName!=="BUTTON") escolher(".pdf,.xlsx,.xls") };
 ["dragenter","dragover"].forEach(ev=>drop.addEventListener(ev,e=>{e.preventDefault();drop.classList.add("sobre")}));
 ["dragleave","drop"].forEach(ev=>drop.addEventListener(ev,e=>{e.preventDefault();drop.classList.remove("sobre")}));
 drop.addEventListener("drop",e=>{const f=[...(e.dataTransfer.files||[])]; if(f.length) receber(f)});

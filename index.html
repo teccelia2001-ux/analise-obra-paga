@@ -1,0 +1,700 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<link rel="icon" type="image/svg+xml" href="data:image/svg+xml,%3Csvg%20xmlns%3D%22http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg%22%20viewBox%3D%220%200%2064%2064%22%3E%3Crect%20width%3D%2264%22%20height%3D%2264%22%20rx%3D%2212%22%20fill%3D%22%230b1220%22%2F%3E%3Crect%20x%3D%2212%22%20y%3D%2214%22%20width%3D%2216%22%20height%3D%2236%22%20rx%3D%223%22%20fill%3D%22%2338bdf8%22%2F%3E%3Crect%20x%3D%2236%22%20y%3D%2214%22%20width%3D%2216%22%20height%3D%2236%22%20rx%3D%223%22%20fill%3D%22%2322c55e%22%2F%3E%3C%2Fsvg%3E">
+<title>Análise de obra paga</title>
+<style>
+:root{
+  --bg:#0b1220; --panel:#151f33; --panel2:#1c2942; --line:#2c3b57; --txt:#e8eefc; --muted:#93a3bf;
+  --head:#22304a; --accent:#38bdf8; --btn:#2563eb;
+  --ok:#22c55e; --ok-bg:rgba(34,197,94,.14); --ok-txt:#86efac;
+  --bad:#ef4444; --bad-bg:rgba(239,68,68,.14); --bad-txt:#fca5a5;
+  --alerta:#f59e0b; --roxo:#a855f7;
+}
+[data-tema="claro"]{
+  --bg:#f1f5f9; --panel:#ffffff; --panel2:#f8fafc; --line:#d7dee8; --txt:#0f172a; --muted:#5b6b85;
+  --head:#e2e8f0; --accent:#0284c7; --btn:#2563eb;
+  --ok:#16a34a; --ok-bg:#dcfce7; --ok-txt:#15803d;
+  --bad:#dc2626; --bad-bg:#fee2e2; --bad-txt:#b91c1c;
+}
+*{box-sizing:border-box}
+body{margin:0;font:14px/1.45 system-ui,Segoe UI,Roboto,sans-serif;background:var(--bg);color:var(--txt)}
+header{background:linear-gradient(90deg,var(--panel),var(--panel2));padding:14px 20px;border-bottom:1px solid var(--line);
+  position:sticky;top:0;z-index:10;display:flex;align-items:center;gap:14px;flex-wrap:wrap}
+h1{margin:0;font-size:18px}
+.sub{color:var(--muted);font-size:12px;margin-top:2px}
+.wrap{padding:16px 20px;max-width:1500px;margin:0 auto}
+.box{background:var(--panel);border:1px solid var(--line);border-radius:12px;padding:14px;margin-bottom:14px}
+.box h2{margin:0 0 4px;font-size:15px;display:flex;align-items:center;gap:8px;flex-wrap:wrap}
+input,select,button,textarea{background:var(--panel2);color:var(--txt);border:1px solid var(--line);border-radius:8px;padding:7px 10px;font:inherit}
+input:focus,select:focus{outline:2px solid var(--accent);outline-offset:-1px}
+button{cursor:pointer;background:var(--btn);border-color:var(--btn);color:#fff;font-weight:600}
+button.sec{background:var(--panel2);border-color:var(--line);color:var(--txt);font-weight:500}
+button:hover{filter:brightness(1.08)}
+.linha{display:flex;gap:8px;flex-wrap:wrap;align-items:center;margin-top:10px}
+.drops{display:grid;grid-template-columns:repeat(auto-fit,minmax(300px,1fr));gap:12px}
+.drop{display:flex;flex-direction:column;gap:6px;padding:16px;border:2px dashed var(--line);border-radius:12px;
+  background:var(--panel2);cursor:pointer;min-height:118px;justify-content:center}
+.drop:hover{border-color:var(--accent)}
+.drop.sobre{border-color:var(--accent);background:var(--head)}
+.drop .tit{font-weight:700;font-size:14px}
+.drop .exp{color:var(--muted);font-size:12px}
+.drop .st{font-size:12.5px;margin-top:2px}
+.cards{display:grid;grid-template-columns:repeat(auto-fit,minmax(170px,1fr));gap:10px;margin-bottom:14px}
+.card{background:var(--panel);border:1px solid var(--line);border-radius:10px;padding:10px 12px}
+.card .lbl{font-size:11px;color:var(--muted);text-transform:uppercase;letter-spacing:.4px}
+.card .val{font-size:20px;font-weight:700;margin-top:3px}
+.card.ok{border-color:var(--ok);background:var(--ok-bg)} .card.ok .val{color:var(--ok-txt)}
+.card.bad{border-color:var(--bad);background:var(--bad-bg)} .card.bad .val{color:var(--bad-txt)}
+.card.alerta{border-color:var(--alerta)} .card.alerta .val{color:var(--alerta)}
+table{width:100%;border-collapse:collapse;background:var(--panel);border-radius:10px;overflow:hidden}
+th,td{padding:7px 10px;text-align:left;border-bottom:1px solid var(--line);font-size:13px}
+th{background:var(--head);position:sticky;top:0;cursor:pointer;white-space:nowrap;font-size:12px}
+th.num,td.num{text-align:right;font-variant-numeric:tabular-nums}
+tbody tr:nth-child(even){background:var(--panel2)}
+tbody tr:hover{background:var(--head)}
+.scroll{max-height:62vh;overflow:auto;border-radius:10px;border:1px solid var(--line)}
+.muted{color:var(--muted)}
+.tag{display:inline-block;padding:1px 8px;border-radius:99px;font-size:11px;font-weight:700;white-space:nowrap;border:1px solid transparent}
+.t-I{background:var(--ok-bg);color:var(--ok-txt);border-color:var(--ok)}
+.t-R{background:var(--bad-bg);color:var(--bad-txt);border-color:var(--bad)}
+.s-pend{background:var(--bad-bg);color:var(--bad-txt);border-color:var(--bad)}
+.s-parc{background:rgba(245,158,11,.16);color:#f59e0b;border-color:#f59e0b}
+.s-maior{background:rgba(168,85,247,.16);color:#c084fc;border-color:#a855f7}
+.s-sem{background:rgba(56,189,248,.16);color:#38bdf8;border-color:#38bdf8}
+.s-ok{background:var(--ok-bg);color:var(--ok-txt);border-color:var(--ok)}
+[data-tema="claro"] .s-parc{background:#ffedd5;color:#b45309}
+[data-tema="claro"] .s-maior{background:#f3e8ff;color:#7e22ce}
+[data-tema="claro"] .s-sem{background:#e0f2fe;color:#0369a1}
+.grid2{display:grid;grid-template-columns:repeat(auto-fit,minmax(240px,1fr));gap:10px}
+.fic{background:var(--panel2);border:1px solid var(--line);border-radius:10px;padding:10px 12px;font-size:12.5px}
+.fic b{display:block;font-size:11px;color:var(--muted);text-transform:uppercase;letter-spacing:.4px;font-weight:700;margin-bottom:4px}
+.fic div+div{margin-top:3px}
+#vazio{padding:36px 20px;text-align:center;border:2px dashed var(--line);border-radius:12px;background:var(--panel)}
+#vazio .big{font-size:32px}
+pre.bruto{margin:10px 0 0;padding:10px;max-height:330px;overflow:auto;background:var(--panel2);border:1px solid var(--line);
+  border-radius:8px;font:11.5px/1.45 ui-monospace,Consolas,monospace;white-space:pre-wrap}
+.aviso{margin:10px 0 0;padding:9px 11px;border-left:3px solid var(--alerta);background:rgba(245,158,11,.12);
+  border-radius:8px;font-size:12.5px;line-height:1.5}
+.bad{color:var(--bad-txt)} .ok{color:var(--ok-txt)}
+@media print{
+  header,.box.nao-imprime,#vazio,button{display:none!important}
+  body{background:#fff;color:#000} .scroll{max-height:none;border:0}
+  .card{border:1px solid #999}
+}
+</style>
+</head>
+<body>
+<header>
+  <div>
+    <h1>⚖️ Análise de obra paga</h1>
+    <div class="sub">Confronta o que foi <b>apontado</b> (fechamento simplificado) com o que foi <b>pago</b> (medição da Energisa), serviço a serviço.</div>
+  </div>
+  <span style="flex:1"></span>
+  <button class="sec" id="btnTema">🌙 Tema</button>
+</header>
+
+<div class="wrap">
+
+  <div class="box nao-imprime">
+    <h2>Documentos da obra</h2>
+    <p class="muted" style="margin:6px 0 0;font-size:12.5px">Tudo é lido no seu navegador — nenhum arquivo sai daqui.
+      Pode arrastar os arquivos para os quadros ou clicar para escolher.</p>
+    <div class="drops" style="margin-top:10px">
+      <label class="drop" id="dropPdf">
+        <span class="tit">📄 Medição paga (PDF)</span>
+        <span class="exp">Medição de Mão-de-Obra da Energisa. Pode adicionar mais de uma — as parcelas somam.</span>
+        <span class="st muted" id="stPdf">nenhum arquivo</span>
+        <input type="file" id="filePdf" accept=".pdf,application/pdf" multiple hidden>
+      </label>
+      <label class="drop" id="dropXls">
+        <span class="tit">📊 Apontado (Excel)</span>
+        <span class="exp">Fechamento simplificado da obra, gerado no termômetro (.xlsx).</span>
+        <span class="st muted" id="stXls">nenhum arquivo</span>
+        <input type="file" id="fileXls" accept=".xlsx" hidden>
+      </label>
+    </div>
+    <div class="linha">
+      <button class="sec" id="verBruto">🔍 Ver o que foi lido</button>
+      <button class="sec" id="limpar">🧹 Limpar tudo</button>
+      <span id="msg" style="font-size:12.5px"></span>
+    </div>
+    <pre class="bruto" id="bruto" hidden></pre>
+  </div>
+
+  <div id="vazio">
+    <div class="big">⚖️</div>
+    <h2 style="margin:8px 0 4px;font-size:17px">Sem confronto ainda</h2>
+    <p class="muted" style="margin:0">Adicione o PDF da medição paga e a planilha do apontado.
+      Com só um dos dois o app já mostra o que leu, mas o confronto precisa dos dois.</p>
+  </div>
+
+  <div id="res" hidden>
+    <div class="box" id="boxFicha">
+      <h2>A obra</h2>
+      <div class="grid2" id="ficha"></div>
+      <div id="avisoObra"></div>
+    </div>
+
+    <div class="cards" id="cards"></div>
+
+    <div class="box nao-imprime" style="margin-bottom:10px">
+      <div class="linha" style="margin:0">
+        <input id="q" placeholder="Buscar código ou serviço" style="min-width:230px">
+        <select id="fop">
+          <option value="">Instalar e retirar</option>
+          <option value="I">Só instalar</option>
+          <option value="R">Só retirar</option>
+        </select>
+        <select id="fsit"><option value="">Todas as situações</option></select>
+        <span style="flex:1"></span>
+        <button class="sec" id="csv">⬇️ Baixar CSV</button>
+        <button class="sec" id="imprimir">🖨️ Imprimir / PDF</button>
+      </div>
+    </div>
+
+    <div class="scroll"><table><thead id="thead"></thead><tbody id="tbody"></tbody><tfoot id="tfoot"></tfoot></table></div>
+    <p class="muted" id="rodape" style="font-size:12.5px"></p>
+  </div>
+
+</div>
+
+<script>
+const $=id=>document.getElementById(id);
+const nnum=n=>Number(n||0).toLocaleString("pt-BR");
+const nval=n=>Number(n||0).toLocaleString("pt-BR",{minimumFractionDigits:2,maximumFractionDigits:2});
+const nqtd=n=>Number(n||0).toLocaleString("pt-BR",{maximumFractionDigits:2});
+const LS={get:k=>{try{return localStorage.getItem(k)}catch(e){return null}},
+          set:(k,v)=>{try{localStorage.setItem(k,v)}catch(e){}}};
+
+if(LS.get("aop_tema")==="claro") document.documentElement.dataset.tema="claro";
+$("btnTema").onclick=()=>{
+  const claro=document.documentElement.dataset.tema==="claro";
+  if(claro) delete document.documentElement.dataset.tema; else document.documentElement.dataset.tema="claro";
+  LS.set("aop_tema",claro?"escuro":"claro");
+};
+
+/* número brasileiro: "R$ 1.234,50" → 1234.5 (o cifrão vem com espaço fino em alguns arquivos) */
+function num(v){
+  if(v===null||v===undefined) return 0;
+  if(typeof v==="number") return v;
+  const s=String(v).replace(/ /g," ").replace(/[^\d,.\-]/g,"").replace(/\.(?=\d{3}\b)/g,"").replace(",",".");
+  const n=parseFloat(s);
+  return isNaN(n)?0:n;
+}
+/* texto que parece dinheiro/decimal brasileiro: 1,00  ·  1.234,56 */
+const ehDecimal=t=>/^-?\d{1,3}(\.\d{3})*,\d{1,4}$/.test(String(t).trim())||/^-?\d+,\d{1,4}$/.test(String(t).trim());
+const ehCodigo=t=>/^\d{4,6}$/.test(String(t).trim());
+
+/* ================= descompactar (usado pelo PDF e pelo XLSX) ================= */
+async function inflar(bytes,formatos){
+  for(const f of (formatos||["deflate","deflate-raw"])){
+    try{
+      const r=new Response(new Blob([bytes]).stream().pipeThrough(new DecompressionStream(f)));
+      return new Uint8Array(await r.arrayBuffer());
+    }catch(e){}
+  }
+  return null;
+}
+/* No PDF o stream vem seguido de uma quebra de linha antes de "endstream", e o
+   descompactador do navegador recusa qualquer sobra no fim — por isso corto o
+   fim e, se ainda assim não abrir, tento cortes vizinhos. */
+async function inflarStreamPdf(seg){
+  let fim=seg.length;
+  while(fim>0 && (seg[fim-1]===10||seg[fim-1]===13)) fim--;
+  for(const corte of [fim,seg.length,fim-1,fim-2]){
+    if(corte<=0||corte>seg.length) continue;
+    const d=await inflar(seg.subarray(0,corte));
+    if(d&&d.length) return d;
+  }
+  return null;
+}
+const LATIN=new TextDecoder("latin1");
+const UTF8=new TextDecoder("utf-8");
+
+/* ================= PDF ================= */
+/* Não uso biblioteca: o PDF da medição tem os textos em streams FlateDecode e as
+   fontes são subconjuntos com Identity-H, então as letras só fazem sentido pelo
+   mapa /ToUnicode que o próprio arquivo carrega. Leio os streams, monto o mapa,
+   percorro os operadores de texto guardando a posição de cada pedaço e junto os
+   pedaços em linhas pela coordenada — é isso que devolve a tabela de serviços. */
+
+function acharStreams(bytes){
+  const s=LATIN.decode(bytes), out=[];
+  let i=0;
+  while(true){
+    const p=s.indexOf("stream",i);
+    if(p<0) break;
+    let ini=p+6;
+    if(s[ini]==="\r") ini++;
+    if(s[ini]==="\n") ini++;
+    const fim=s.indexOf("endstream",ini);
+    if(fim<0) break;
+    out.push(bytes.subarray(ini,fim));
+    i=fim+9;
+  }
+  return out;
+}
+
+/* <0044> <0061> → glifo 0x44 vale "a" */
+function lerCMap(txt,mapa){
+  for(const bloco of txt.match(/beginbfchar([\s\S]*?)endbfchar/g)||[]){
+    for(const m of bloco.matchAll(/<([0-9A-Fa-f]{2,4})>\s*<([0-9A-Fa-f]+)>/g)){
+      const g=parseInt(m[1],16);
+      if(!mapa.has(g)) mapa.set(g,utf16(m[2]));
+    }
+  }
+  for(const bloco of txt.match(/beginbfrange([\s\S]*?)endbfrange/g)||[]){
+    for(const m of bloco.matchAll(/<([0-9A-Fa-f]{2,4})>\s*<([0-9A-Fa-f]{2,4})>\s*(?:<([0-9A-Fa-f]+)>|\[([\s\S]*?)\])/g)){
+      const lo=parseInt(m[1],16), hi=parseInt(m[2],16);
+      if(m[3]!==undefined){
+        const base=parseInt(m[3].slice(0,4),16);
+        for(let g=lo;g<=hi && g-lo<65536;g++) if(!mapa.has(g)) mapa.set(g,String.fromCharCode(base+(g-lo)));
+      }else{
+        const itens=[...(m[4]||"").matchAll(/<([0-9A-Fa-f]+)>/g)].map(x=>utf16(x[1]));
+        itens.forEach((t,k)=>{ if(!mapa.has(lo+k)) mapa.set(lo+k,t) });
+      }
+    }
+  }
+}
+const utf16=hex=>{let s="";for(let i=0;i+4<=hex.length;i+=4)s+=String.fromCharCode(parseInt(hex.substr(i,4),16));
+  return s||String.fromCharCode(parseInt(hex,16)||0)};
+
+const mul=(a,b)=>[a[0]*b[0]+a[1]*b[2], a[0]*b[1]+a[1]*b[3],
+                  a[2]*b[0]+a[3]*b[2], a[2]*b[1]+a[3]*b[3],
+                  a[4]*b[0]+a[5]*b[2]+b[4], a[4]*b[1]+a[5]*b[3]+b[5]];
+
+function textoDoConteudo(cont,mapa){
+  const frag=[];
+  let ctm=[1,0,0,1,0,0], pilha=[], tm=[1,0,0,1,0,0], tlm=[1,0,0,1,0,0], leading=0;
+  const re=/(q|Q|BT|ET|T\*)\s|((?:-?[\d.]+\s+){6})cm|((?:-?[\d.]+\s+){6})Tm|(-?[\d.]+)\s+(-?[\d.]+)\s+(TD|Td)|(-?[\d.]+)\s+TL|\[([\s\S]*?)\]\s*TJ|<([0-9A-Fa-f\s]*)>\s*Tj|\(((?:\\.|[^)\\])*)\)\s*Tj/g;
+  let m;
+  while((m=re.exec(cont))){
+    if(m[1]){
+      if(m[1]==="q") pilha.push(ctm.slice());
+      else if(m[1]==="Q") ctm=pilha.pop()||ctm;
+      else if(m[1]==="BT"){ tm=[1,0,0,1,0,0]; tlm=tm.slice() }
+      else if(m[1]==="T*"){ tlm=mul([1,0,0,1,0,-leading],tlm); tm=tlm.slice() }
+      continue;
+    }
+    if(m[2]){ ctm=mul(m[2].trim().split(/\s+/).map(Number),ctm); continue }
+    if(m[3]){ tm=m[3].trim().split(/\s+/).map(Number); tlm=tm.slice(); continue }
+    if(m[4]!==undefined){
+      const tx=+m[4], ty=+m[5];
+      if(m[6]==="TD") leading=-ty;
+      tlm=mul([1,0,0,1,tx,ty],tlm); tm=tlm.slice(); continue;
+    }
+    if(m[7]!==undefined){ leading=+m[7]; continue }
+    let txt="";
+    if(m[8]!==undefined){
+      for(const h of m[8].matchAll(/<([0-9A-Fa-f]+)>/g)) txt+=decodifica(h[1],mapa);
+    }else if(m[9]!==undefined){
+      txt=decodifica(m[9].replace(/\s+/g,""),mapa);
+    }else if(m[10]!==undefined){
+      txt=m[10].replace(/\\([nrtbf()\\])/g,(_,c)=>({n:"\n",r:"\r",t:"\t",b:"\b",f:"\f"})[c]||c);
+    }
+    if(!txt.trim()) continue;
+    const M=mul(tm,ctm);
+    frag.push({x:M[4],y:M[5],t:txt});
+  }
+  return frag;
+}
+function decodifica(hex,mapa){
+  let s="";
+  for(let i=0;i+4<=hex.length;i+=4){
+    const g=parseInt(hex.substr(i,4),16);
+    s+= mapa.has(g)? mapa.get(g) : (g>=3&&g<=93? String.fromCharCode(g+29) : "");
+  }
+  return s;
+}
+
+/* junta os pedaços em linhas: mesma altura = mesma linha, depois ordena pela esquerda */
+function emLinhas(frag){
+  const ord=frag.map((f,i)=>({...f,i})).sort((a,b)=> b.y-a.y || a.x-b.x || a.i-b.i);
+  const linhas=[];
+  for(const f of ord){
+    const ult=linhas[linhas.length-1];
+    if(ult && Math.abs(ult.y-f.y)<=2.2){ ult.cels.push(f); ult.y=(ult.y+f.y)/2 }
+    else linhas.push({y:f.y,cels:[f]});
+  }
+  for(const l of linhas){ l.cels.sort((a,b)=>a.x-b.x || a.i-b.i); l.txt=l.cels.map(c=>c.t.trim()).join(" ") }
+  return linhas;
+}
+
+async function lerPDF(arquivo){
+  const bytes=new Uint8Array(await arquivo.arrayBuffer());
+  const mapa=new Map(); const conteudos=[];
+  for(const s of acharStreams(bytes)){
+    let d=await inflarStreamPdf(s);
+    let txt=LATIN.decode(d||s);
+    if(/beginbfchar|beginbfrange/.test(txt)) lerCMap(txt,mapa);
+    if(/\bTJ\b|\bTj\b/.test(txt) && /\bTf\b/.test(txt)) conteudos.push(txt);
+  }
+  if(!conteudos.length) throw new Error("não achei o texto dentro do PDF (arquivo digitalizado ou protegido?)");
+  const frag=[];
+  for(const c of conteudos) frag.push(...textoDoConteudo(c,mapa));
+  const linhas=emLinhas(frag);
+
+  const reg={arquivo:arquivo.name,glifos:mapa.size,linhas:linhas.length,itens:[],cab:{},totais:{},avisos:[]};
+
+  /* ---- cabeçalho: o valor é a célula seguinte ao rótulo, na mesma linha ---- */
+  const rotulos={"Obra:":"obra","Contrato:":"contrato","Empreiteira:":"empreiteira","Endereço:":"endereco",
+    "Município:":"municipio","Dt. Medição:":"dtMedicao","Dt. Pagamento:":"dtPagamento","Dt. Aprovação:":"dtAprovacao",
+    "Situação Medição:":"sitMedicao","Situação Pagamento:":"sitPagamento","Nota Fiscal:":"notaFiscal",
+    "Lote:":"lote","Item:":"item","Valor Total a Pagar:":"totalPagar",
+    "Valor Total de Mão de Obra ODI:":"totalODI","Valor Total de Mão de Obra ODD:":"totalODD"};
+  linhas.forEach((l,li)=>{
+    l.cels.forEach((c,k)=>{
+      const rot=Object.keys(rotulos).find(r=>c.t.trim()===r);
+      if(rot && l.cels[k+1] && reg.cab[rotulos[rot]]===undefined) reg.cab[rotulos[rot]]=l.cels[k+1].t.trim();
+      /* o município vem como código e o nome logo depois dele, na mesma linha */
+      if(rot==="Município:" && l.cels[k+2]){
+        const nome=l.cels[k+2].t.trim();
+        if(/[A-Za-zÀ-ÿ]{3}/.test(nome) && !/:$/.test(nome)) reg.cab.municipioNome=nome;
+      }
+    });
+  });
+  reg.totais.pagar=num(reg.cab.totalPagar);
+  reg.totais.odi=num(reg.cab.totalODI);
+  reg.totais.odd=num(reg.cab.totalODD);
+
+  /* ---- itens: seção Instalação/Retirada e, na linha, 5 números decimais ----
+     os decimais são, em ordem: Qtd MO · Qtd US · Vlr Unit US · Vlr Unit R$ · Vlr Total R$;
+     TUC e natureza contábil vêm como inteiros e por isso ficam de fora. */
+  let sec="";
+  for(const l of linhas){
+    const t=l.txt.trim();
+    if(/^instala[çc][ãa]o$/i.test(t)){ sec="I"; continue }
+    if(/^retirada$/i.test(t)){ sec="R"; continue }
+    const cels=l.cels.map(c=>c.t.trim()).filter(Boolean);
+    if(!cels.length || !ehCodigo(cels[0])) continue;
+    const dec=cels.filter(ehDecimal);
+    if(dec.length<2) continue;
+    const desc=cels.slice(1).find(c=>/[A-Za-zÀ-ÿ]/.test(c))||"";
+    const qtd=num(dec[0]);
+    const total=num(dec[dec.length-1]);
+    if(dec.length!==5) reg.avisos.push(`linha do código ${cels[0]} veio com ${dec.length} números (esperava 5)`);
+    reg.itens.push({op:sec||"?",cod:cels[0],desc,qtd,vlr:total,unit:qtd?total/qtd:0});
+  }
+  if(!reg.itens.length) reg.avisos.push("não encontrei linhas de serviço no PDF");
+  return reg;
+}
+
+/* ================= XLSX ================= */
+async function lerXLSX(arquivo){
+  const buf=new Uint8Array(await arquivo.arrayBuffer()), dv=new DataView(buf.buffer);
+  let eo=-1;
+  for(let i=buf.length-22;i>=0;i--){ if(dv.getUint32(i,true)===0x06054b50){ eo=i; break } }
+  if(eo<0) throw new Error("não parece um .xlsx (fim do zip não encontrado)");
+  const n=dv.getUint16(eo+10,true); let p=dv.getUint32(eo+16,true); const arqs={};
+  for(let k=0;k<n;k++){
+    const nl=dv.getUint16(p+28,true), el=dv.getUint16(p+30,true), cl=dv.getUint16(p+32,true);
+    arqs[LATIN.decode(buf.subarray(p+46,p+46+nl))]={m:dv.getUint16(p+10,true),lho:dv.getUint32(p+42,true),cs:dv.getUint32(p+20,true)};
+    p+=46+nl+el+cl;
+  }
+  const ler=async nome=>{
+    const a=arqs[nome]; if(!a) return "";
+    const nl=dv.getUint16(a.lho+26,true), el=dv.getUint16(a.lho+28,true);
+    const ini=a.lho+30+nl+el, d=buf.subarray(ini,ini+a.cs);
+    if(a.m===0) return UTF8.decode(d);
+    const out=await inflar(d,["deflate-raw"]);
+    return out? UTF8.decode(out) : "";
+  };
+  const nomeSheet=Object.keys(arqs).find(k=>/worksheets\/sheet1\.xml$/.test(k))||"xl/worksheets/sheet1.xml";
+  const nomeSS=Object.keys(arqs).find(k=>/sharedStrings\.xml$/.test(k))||"xl/sharedStrings.xml";
+  const ss=await ler(nomeSS);
+  const S=[...ss.matchAll(/<si>([\s\S]*?)<\/si>/g)].map(m=>
+    [...m[1].matchAll(/<t[^>]*>([\s\S]*?)<\/t>/g)].map(x=>x[1]).join("")
+      .replace(/&amp;/g,"&").replace(/&lt;/g,"<").replace(/&gt;/g,">").replace(/&quot;/g,'"').replace(/&#39;/g,"'"));
+  const sh=await ler(nomeSheet);
+  const L=[];
+  for(const m of sh.matchAll(/<row[^>]*r="(\d+)"[^>]*>([\s\S]*?)<\/row>/g)){
+    const c={};
+    for(const cel of m[2].matchAll(/<c r="([A-Z]+)\d+"([^>]*)>(?:<v>([\s\S]*?)<\/v>|<is>[\s\S]*?<t[^>]*>([\s\S]*?)<\/t>[\s\S]*?<\/is>)?<\/c>/g)){
+      const v = cel[4]!==undefined? cel[4] : (cel[3]===undefined? "" : (/t="s"/.test(cel[2]||"")? S[+cel[3]] : cel[3]));
+      if(v!=="") c[cel[1]]=v;
+    }
+    if(Object.keys(c).length) L.push(c);
+  }
+
+  const reg={arquivo:arquivo.name,linhas:L.length,itens:[],cab:{},avisos:[]};
+  /* colunas pelo cabeçalho da planilha; B/D/E/F/G é só o padrão do fechamento */
+  let COL={cod:"B",desc:"D",qtd:"E",unit:"F",vlr:"G"};
+  for(const c of L){
+    const ach=re=>Object.keys(c).find(k=>re.test(String(c[k])));
+    const kc=ach(/^\s*cod/i), kq=ach(/quantidade|^\s*qtd/i);
+    if(kc&&kq){ COL={cod:kc,desc:ach(/descri|servi[çc]o/i)||"D",qtd:kq,
+      unit:ach(/valor\s*unit/i)||"F",vlr:ach(/valor\s*total/i)||"G"}; break }
+  }
+  reg.colunas=COL;
+  /* rótulos do topo: OBRA Nº, TOTAL, LOCAL, datas */
+  for(const c of L){
+    const ks=Object.keys(c);
+    ks.forEach((k,i)=>{
+      const v=String(c[k]).trim();
+      let prox=ks[i+1]?String(c[ks[i+1]]).trim():"";
+      /* campo vazio na planilha faz o rótulo seguinte cair no lugar do valor */
+      if(/:$/.test(prox)) prox="";
+      if(/^obra\s*n/i.test(v) && prox) reg.cab.obra=reg.cab.obra||prox;
+      else if(/^total\s*:?$/i.test(v) && prox) reg.cab.total=reg.cab.total||prox;
+      else if(/^local/i.test(v) && prox) reg.cab.local=reg.cab.local||prox;
+      else if(/in[íi]cio da obra/i.test(v) && prox) reg.cab.inicio=reg.cab.inicio||prox;
+      else if(/t[ée]rmino da obra/i.test(v) && prox) reg.cab.termino=reg.cab.termino||prox;
+    });
+  }
+  let sec="";
+  for(const c of L){
+    const txt=Object.values(c).join(" ");
+    if(/INSTALAR/i.test(txt) && c[COL.qtd]===undefined){ sec="I"; continue }
+    if(/RETIRAR/i.test(txt) && c[COL.qtd]===undefined){ sec="R"; continue }
+    const cod=c[COL.cod]===undefined?"":String(c[COL.cod]).trim();
+    if(!ehCodigo(cod) || c[COL.qtd]===undefined) continue;
+    reg.itens.push({op:sec||"?",cod,desc:String(c[COL.desc]||"").trim(),
+      qtd:num(c[COL.qtd]), unit:num(c[COL.unit]), vlr:num(c[COL.vlr])});
+  }
+  if(!reg.itens.length) reg.avisos.push(`a planilha tem ${L.length} linhas, mas nenhuma virou serviço (colunas ${COL.cod}/${COL.qtd})`);
+  return reg;
+}
+
+/* ================= estado e confronto ================= */
+let PAGOS=[];      /* uma entrada por PDF */
+let APONT=null;    /* o xlsx */
+let sortKey=null, sortDir=1;
+
+const SITS=["Pendente de pagamento","Pagamento parcial","Pago a mais","Pago sem apontamento","Conferido"];
+const CLS={"Pendente de pagamento":"s-pend","Pagamento parcial":"s-parc","Pago a mais":"s-maior",
+  "Pago sem apontamento":"s-sem","Conferido":"s-ok"};
+
+/* uma linha por operação + código, somando as parcelas pagas */
+function confronto(){
+  if(!APONT||!PAGOS.length) return [];
+  const ap=new Map(), pg=new Map(), desc=new Map();
+  for(const it of APONT.itens){
+    const k=it.op+"|"+it.cod, a=ap.get(k)||{qtd:0,vlr:0,unit:it.unit};
+    a.qtd+=it.qtd; a.vlr+=it.vlr; if(!a.unit) a.unit=it.unit; ap.set(k,a);
+    if(it.desc) desc.set(it.cod,it.desc);
+  }
+  for(const p of PAGOS) for(const it of p.itens){
+    const k=it.op+"|"+it.cod, a=pg.get(k)||{qtd:0,vlr:0,unit:it.unit};
+    a.qtd+=it.qtd; a.vlr+=it.vlr; if(!a.unit) a.unit=it.unit; pg.set(k,a);
+    if(it.desc && !desc.has(it.cod)) desc.set(it.cod,it.desc);
+  }
+  const out=[];
+  for(const k of new Set([...ap.keys(),...pg.keys()])){
+    const [op,cod]=k.split("|");
+    const A=ap.get(k)||{qtd:0,vlr:0,unit:0}, P=pg.get(k)||{qtd:0,vlr:0,unit:0};
+    let sit;
+    if(A.qtd>0 && P.qtd===0) sit="Pendente de pagamento";
+    else if(A.qtd>P.qtd && P.qtd>0) sit="Pagamento parcial";
+    else if(P.qtd>A.qtd && A.qtd>0) sit="Pago a mais";
+    else if(A.qtd===0 && P.qtd>0) sit="Pago sem apontamento";
+    else sit="Conferido";
+    const unit=A.unit||P.unit||0;
+    const difq=Math.round((A.qtd-P.qtd)*100)/100;
+    out.push({op,cod,desc:desc.get(cod)||"",qtdA:A.qtd,qtdP:P.qtd,difq,
+      vlrA:A.vlr,vlrP:P.vlr,difv:Math.round((A.vlr-P.vlr)*100)/100,unit,sit});
+  }
+  return out;
+}
+
+function filtradas(){
+  const q=$("q").value.trim().toLowerCase(), op=$("fop").value, sit=$("fsit").value;
+  return confronto().filter(l=>
+    (!op||l.op===op) && (!sit||l.sit===sit) &&
+    (!q||(l.cod+" "+l.desc).toLowerCase().includes(q)));
+}
+function ordenar(arr){
+  if(!sortKey) return arr.sort((a,b)=> a.op===b.op ? String(a.desc).localeCompare(String(b.desc),"pt-BR")
+                                                  : (a.op==="I"?-1:1));
+  return arr.sort((a,b)=>{
+    const x=a[sortKey], y=b[sortKey];
+    const r = typeof x==="number"&&typeof y==="number" ? x-y : String(x??"").localeCompare(String(y??""),"pt-BR");
+    return r*sortDir;
+  });
+}
+
+/* ================= tela ================= */
+function fichaHTML(){
+  const p=PAGOS[0]?PAGOS[0].cab:{};
+  const a=APONT?APONT.cab:{};
+  const somaPago=PAGOS.reduce((s,x)=>s+(x.totais.pagar||0),0);
+  const bloco=(tit,itens)=>`<div class="fic"><b>${tit}</b>${itens.filter(x=>x[1]).map(x=>
+    `<div>${x[0]}: <b>${x[1]}</b></div>`).join("")||'<div class="muted">—</div>'}</div>`;
+  return [
+    bloco("Apontado (fechamento)",[["Obra",a.obra],["Local",a.local],["Início",a.inicio],["Término",a.termino],
+      ["Total apontado",a.total]]),
+    bloco("Medição paga",[["Obra",p.obra],["Contrato",p.contrato],["Empreiteira",p.empreiteira],
+      ["Município",[p.municipioNome,p.municipio].filter(Boolean).join(" · ")],["Endereço",p.endereco]]),
+    bloco("Situação do pagamento",[["Medição",p.sitMedicao],["Pagamento",p.sitPagamento],
+      ["Dt. medição",p.dtMedicao],["Dt. pagamento",p.dtPagamento],["Nota fiscal",p.notaFiscal]]),
+    bloco("Parcelas carregadas",PAGOS.map((x,i)=>[`${i+1}. ${x.arquivo}`,"R$ "+nval(x.totais.pagar)])
+      .concat(PAGOS.length>1?[["Soma das parcelas","R$ "+nval(somaPago)]]:[]))
+  ].join("");
+}
+
+function render(){
+  const temTudo=!!(APONT&&PAGOS.length);
+  $("vazio").hidden=temTudo;
+  $("res").hidden=!temTudo;
+  if(!temTudo) return;
+
+  $("ficha").innerHTML=fichaHTML();
+
+  const todas=confronto();
+  const tA=todas.reduce((s,l)=>s+l.vlrA,0), tP=todas.reduce((s,l)=>s+l.vlrP,0);
+  const pend=todas.filter(l=>l.sit==="Pendente de pagamento"||l.sit==="Pagamento parcial");
+  const vPend=pend.reduce((s,l)=>s+Math.max(0,l.difv),0);
+  const maior=todas.filter(l=>l.sit==="Pago a mais"||l.sit==="Pago sem apontamento");
+  const vMaior=maior.reduce((s,l)=>s+Math.abs(Math.min(0,l.difv)),0);
+  $("cards").innerHTML=`
+    <div class="card"><div class="lbl">Apontado</div><div class="val">R$ ${nval(tA)}</div></div>
+    <div class="card"><div class="lbl">Pago</div><div class="val">R$ ${nval(tP)}</div></div>
+    <div class="card ${tA-tP>0.005?"bad":"ok"}"><div class="lbl">Diferença</div><div class="val">R$ ${nval(tA-tP)}</div></div>
+    <div class="card ${pend.length?"bad":"ok"}"><div class="lbl">A receber (${nnum(pend.length)} itens)</div><div class="val">R$ ${nval(vPend)}</div></div>
+    <div class="card ${maior.length?"alerta":""}"><div class="lbl">Pago a mais (${nnum(maior.length)} itens)</div><div class="val">R$ ${nval(vMaior)}</div></div>
+    <div class="card ok"><div class="lbl">Conferidos</div><div class="val">${nnum(todas.filter(l=>l.sit==="Conferido").length)}</div></div>`;
+
+  const sel=$("fsit"), antes=sel.value;
+  const cont=new Map(); todas.forEach(l=>cont.set(l.sit,(cont.get(l.sit)||0)+1));
+  sel.innerHTML='<option value="">Todas as situações</option>'+SITS.filter(s=>cont.get(s))
+    .map(s=>`<option value="${s}">${s} (${cont.get(s)})</option>`).join("");
+  sel.value=[...sel.options].some(o=>o.value===antes)?antes:"";
+
+  const cols=[["op","Op."],["cod","Código"],["desc","Serviço"],["qtdA","Qtd. apontada",1],["qtdP","Qtd. paga",1],
+    ["difq","Dif. qtd",1],["vlrA","Apontado (R$)",1],["vlrP","Pago (R$)",1],["difv","Diferença (R$)",1],["sit","Situação"]];
+  $("thead").innerHTML="<tr>"+cols.map(c=>`<th class="${c[2]?"num":""}" data-k="${c[0]}">${c[1]}${
+    sortKey===c[0]?(sortDir>0?" ▲":" ▼"):""}</th>`).join("")+"</tr>";
+  $("thead").querySelectorAll("th").forEach(th=>th.onclick=()=>{
+    const k=th.dataset.k; sortDir = sortKey===k? -sortDir : 1; sortKey=k; render();
+  });
+
+  const dados=ordenar(filtradas());
+  const opTag=o=>`<span class="tag t-${o==="I"||o==="R"?o:"x"}">${o==="I"?"Instalar":o==="R"?"Retirar":"—"}</span>`;
+  $("tbody").innerHTML = dados.map(l=>`<tr>
+      <td>${opTag(l.op)}</td><td><b>${l.cod}</b></td><td class="muted">${l.desc}</td>
+      <td class="num">${nqtd(l.qtdA)}</td><td class="num">${nqtd(l.qtdP)}</td>
+      <td class="num ${l.difq>0?"bad":l.difq<0?"ok":""}">${nqtd(l.difq)}</td>
+      <td class="num">${nval(l.vlrA)}</td><td class="num">${nval(l.vlrP)}</td>
+      <td class="num ${l.difv>0.005?"bad":l.difv<-0.005?"ok":""}">${nval(l.difv)}</td>
+      <td><span class="tag ${CLS[l.sit]}">${l.sit}</span></td></tr>`).join("")
+    || `<tr><td colspan="${cols.length}" class="muted" style="text-align:center;padding:24px">Nada com esses filtros.</td></tr>`;
+
+  const sA=dados.reduce((s,l)=>s+l.vlrA,0), sP=dados.reduce((s,l)=>s+l.vlrP,0);
+  $("tfoot").innerHTML=`<tr><th colspan="6" style="text-align:right">Total do que está na tela</th>
+    <th class="num">${nval(sA)}</th><th class="num">${nval(sP)}</th>
+    <th class="num">${nval(sA-sP)}</th><th></th></tr>`;
+
+  const avisos=[...(APONT.avisos||[]),...PAGOS.flatMap(p=>p.avisos||[])];
+  $("rodape").innerHTML=`${nnum(dados.length)} linha${dados.length===1?"":"s"} de ${nnum(todas.length)} · `+
+    `apontado: ${nnum(APONT.itens.length)} serviços · pago: ${nnum(PAGOS.reduce((s,p)=>s+p.itens.length,0))} serviços em ${PAGOS.length} medição(ões).`+
+    (avisos.length?` <span class="bad">⚠️ ${avisos.slice(0,3).join(" · ")}</span>`:"");
+
+  /* obra do PDF e obra da planilha não têm o mesmo formato: aviso em vez de palpite */
+  const oa=(APONT.cab.obra||"").replace(/\D/g,""), op2=(PAGOS[0].cab.obra||"");
+  $("avisoObra").innerHTML = oa&&op2 ? `<div class="aviso">A planilha é da obra <b>${APONT.cab.obra}</b> e a medição
+    traz a obra <b>${op2}</b> — são numerações diferentes (Teccel × Energisa), então o app <b>não</b> confere se é a mesma obra.
+    Confirme antes de usar o resultado.</div>` : "";
+}
+
+/* ================= arquivos ================= */
+function ligarDrop(caixa,input,aoReceber){
+  const el=$(caixa), inp=$(input);
+  el.onclick=e=>{ if(e.target!==inp) inp.click() };
+  inp.onchange=()=>{ if(inp.files.length) aoReceber([...inp.files]); inp.value="" };
+  ["dragenter","dragover"].forEach(ev=>el.addEventListener(ev,e=>{e.preventDefault();el.classList.add("sobre")}));
+  ["dragleave","drop"].forEach(ev=>el.addEventListener(ev,e=>{e.preventDefault();el.classList.remove("sobre")}));
+  el.addEventListener("drop",e=>{ const f=[...(e.dataTransfer.files||[])]; if(f.length) aoReceber(f) });
+}
+
+async function receberPdf(arqs){
+  for(const a of arqs){
+    $("msg").innerHTML=`lendo <b>${a.name}</b>…`;
+    try{
+      const r=await lerPDF(a);
+      PAGOS=PAGOS.filter(p=>p.arquivo!==r.arquivo).concat([r]);
+      $("msg").innerHTML=`✅ <b>${r.arquivo}</b>: ${nnum(r.itens.length)} serviços · R$ ${nval(r.totais.pagar)}`;
+    }catch(e){ $("msg").innerHTML=`<span class="bad">❌ ${a.name}: ${e.message}</span>` }
+  }
+  $("stPdf").innerHTML=PAGOS.length? `<b class="ok">${PAGOS.length} medição(ões)</b> · ${
+    nnum(PAGOS.reduce((s,p)=>s+p.itens.length,0))} serviços` : "nenhum arquivo";
+  render();
+}
+async function receberXls(arqs){
+  const a=arqs[0];
+  $("msg").innerHTML=`lendo <b>${a.name}</b>…`;
+  try{
+    APONT=await lerXLSX(a);
+    $("stXls").innerHTML=`<b class="ok">${APONT.arquivo}</b> · ${nnum(APONT.itens.length)} serviços`;
+    $("msg").innerHTML=`✅ apontado: ${nnum(APONT.itens.length)} serviços${APONT.cab.obra?` · obra ${APONT.cab.obra}`:""}`;
+  }catch(e){ $("msg").innerHTML=`<span class="bad">❌ ${a.name}: ${e.message}</span>` }
+  render();
+}
+/* aceita os dois tipos em qualquer um dos quadros — é o erro mais fácil de cometer */
+const separar=arqs=>({pdf:arqs.filter(f=>/\.pdf$/i.test(f.name)), xls:arqs.filter(f=>/\.xlsx?$/i.test(f.name))});
+ligarDrop("dropPdf","filePdf",async arqs=>{ const s=separar(arqs);
+  if(s.pdf.length) await receberPdf(s.pdf); if(s.xls.length) await receberXls(s.xls) });
+ligarDrop("dropXls","fileXls",async arqs=>{ const s=separar(arqs);
+  if(s.xls.length) await receberXls(s.xls); if(s.pdf.length) await receberPdf(s.pdf) });
+
+$("limpar").onclick=()=>{
+  PAGOS=[]; APONT=null; sortKey=null;
+  $("stPdf").textContent="nenhum arquivo"; $("stXls").textContent="nenhum arquivo";
+  $("msg").innerHTML="🧹 limpo"; $("bruto").hidden=true;
+  $("q").value=""; $("fop").value=""; $("fsit").value="";
+  render();
+};
+
+$("verBruto").onclick=()=>{
+  const p=$("bruto");
+  if(!p.hidden){ p.hidden=true; return }
+  const L=[];
+  if(APONT){
+    L.push(`=== APONTADO · ${APONT.arquivo} ===`,
+      `linhas na planilha: ${APONT.linhas} · colunas usadas: ${JSON.stringify(APONT.colunas)}`,
+      `cabeçalho: ${JSON.stringify(APONT.cab)}`,
+      ...APONT.itens.slice(0,60).map(i=>`  ${i.op} ${i.cod} ${i.desc} · qtd ${i.qtd} · unit ${i.unit} · total ${i.vlr}`));
+    if(APONT.itens.length>60) L.push(`  … e mais ${APONT.itens.length-60}`);
+    (APONT.avisos||[]).forEach(a=>L.push("  ⚠️ "+a));
+  } else L.push("(sem planilha do apontado)");
+  for(const p2 of PAGOS){
+    L.push("",`=== PAGO · ${p2.arquivo} ===`,
+      `glifos mapeados: ${p2.glifos} · linhas de texto: ${p2.linhas}`,
+      `cabeçalho: ${JSON.stringify(p2.cab)}`,
+      `totais: ${JSON.stringify(p2.totais)}`,
+      ...p2.itens.slice(0,60).map(i=>`  ${i.op} ${i.cod} ${i.desc} · qtd ${i.qtd} · total ${i.vlr}`));
+    if(p2.itens.length>60) L.push(`  … e mais ${p2.itens.length-60}`);
+    (p2.avisos||[]).forEach(a=>L.push("  ⚠️ "+a));
+  }
+  if(!PAGOS.length) L.push("","(sem PDF de medição paga)");
+  p.textContent=L.join("\n"); p.hidden=false;
+};
+
+["q","fop","fsit"].forEach(id=>$(id).addEventListener("input",render));
+$("fsit").addEventListener("change",render);
+$("imprimir").onclick=()=>window.print();
+$("csv").onclick=()=>{
+  const dados=ordenar(filtradas());
+  if(!dados.length){ $("rodape").textContent="nada para baixar com os filtros atuais"; return }
+  const esc=v=>'"'+String(v??"").replace(/"/g,'""')+'"';
+  const cab=["Operacao","Codigo","Servico","Qtd apontada","Qtd paga","Dif qtd","Valor apontado","Valor pago","Diferenca","Situacao"];
+  const linhas=dados.map(l=>[l.op==="I"?"Instalar":l.op==="R"?"Retirar":"", l.cod, l.desc,
+    String(l.qtdA).replace(".",","), String(l.qtdP).replace(".",","), String(l.difq).replace(".",","),
+    l.vlrA.toFixed(2).replace(".",","), l.vlrP.toFixed(2).replace(".",","), l.difv.toFixed(2).replace(".",","), l.sit]);
+  const csv="﻿"+[cab,...linhas].map(l=>l.map(esc).join(";")).join("\r\n");
+  const url=URL.createObjectURL(new Blob([csv],{type:"text/csv;charset=utf-8"}));
+  const a=document.createElement("a");
+  a.href=url; a.download="obra-paga-"+((APONT&&APONT.cab.obra)||"confronto").replace(/\W+/g,"")+".csv";
+  a.style.display="none"; document.body.appendChild(a); a.click();
+  setTimeout(()=>{a.remove(); URL.revokeObjectURL(url)},4000);
+  $("rodape").textContent="⬇️ "+a.download;
+};
+
+/* deixa as funções de leitura acessíveis para teste */
+window.__app={lerPDF,lerXLSX,confronto,num,ehDecimal,
+  get PAGOS(){return PAGOS}, set PAGOS(v){PAGOS=v},
+  get APONT(){return APONT}, set APONT(v){APONT=v}, render};
+</script>
+</body>
+</html>

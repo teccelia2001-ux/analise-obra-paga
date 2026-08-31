@@ -752,6 +752,13 @@ function alternarInativo(op,cod){
 /* o que foi pago a mais abate o pendente: entra com sinal negativo nos totais */
 const sinal=sit=>(sit==="Pago a mais"||sit==="Pago sem apontamento")?-1:1;
 const valorSit=x=>sinal(x.sit)*Math.abs(x.vdif);
+/* o líquido da obra: pendente + parcial menos o que foi pago a mais ou sem apontamento
+   (conferido fica de fora — só carrega centavos de arredondamento) */
+const liquido=arr=>arr.filter(x=>x.sit!=="Conferido").reduce((s,x)=>s+valorSit(x),0);
+const aReceber=arr=>arr.filter(x=>x.sit==="Pendente de pagamento"||x.sit==="Pagamento parcial")
+  .reduce((s,x)=>s+Math.abs(x.vdif),0);
+const abatimento=arr=>arr.filter(x=>x.sit==="Pago a mais"||x.sit==="Pago sem apontamento")
+  .reduce((s,x)=>s+Math.abs(x.vdif),0);
 
 const obraApont=()=>(APONT&&APONT.cab.obra)||"—";
 const obraPaga=()=>(PAGOS[0]&&PAGOS[0].cab.obra)||"";
@@ -761,18 +768,20 @@ function desenharCards(){
   const L=confronto().filter(x=>!x.inativo);
   const tA=L.reduce((s,x)=>s+x.va,0), tP=L.reduce((s,x)=>s+x.vp,0);
   const pend=L.filter(x=>x.sit==="Pendente de pagamento"||x.sit==="Pagamento parcial");
-  const vPend=pend.reduce((s,x)=>s+Math.abs(x.vdif),0);
   const mais=L.filter(x=>x.sit==="Pago a mais"||x.sit==="Pago sem apontamento");
-  const vMais=mais.reduce((s,x)=>s+Math.abs(x.vdif),0);
+  const vPend=aReceber(L), vMais=abatimento(L), liq=liquido(L);
   const conf=L.filter(x=>x.sit==="Conferido").length;
-  const card=(lbl,val,cls)=>`<div class="card ${cls||""}"><div class="lbl">${lbl}</div><div class="val">${val}</div></div>`;
+  const card=(lbl,val,cls,dica)=>`<div class="card ${cls||""}"${dica?` title="${esc(dica)}"`:""}><div class="lbl">${lbl}</div><div class="val">${val}</div></div>`;
   $("cards").innerHTML=
     card("Obra",esc(obraApont()))+
     card("Apontado",brl(tA))+
     card("Pago",brl(tP))+
-    card("Diferença",brl(tA-tP),tA-tP>0.005?"bad":"ok")+
-    card(`A receber · ${pend.length} serviços`,brl(vPend),pend.length?"bad":"ok")+
-    card(`Pago a mais · ${mais.length} serviços`,brl(vMais),mais.length?"cob":"")+
+    card(`Pendente · ${pend.length} serviços`,brl(vPend),pend.length?"bad":"ok",
+      "Soma do que foi apontado e não foi pago (pendente + parcial), antes do abatimento.")+
+    card(`Pago a mais · ${mais.length} serviços`,"− "+brl(vMais),mais.length?"cob":"",
+      "Pago a mais e pago sem apontamento — abatem do pendente.")+
+    card("A receber (líquido)",brl(liq),liq>0.005?"bad":"ok",
+      "Pendente menos o que foi pago a mais ou sem apontamento.")+
     card("Conferidos",nnum(conf),"ok");
 }
 
@@ -786,13 +795,16 @@ function blocoSituacao(sit,itens){
   });
   if(!its.length) return "";
   const ativos=its.filter(x=>!x.inativo);
-  const sv=ativos.reduce((a,x)=>a+Math.abs(x.vdif),0);
+  /* pago a mais e pago sem apontamento entram negativos: abatem o pendente */
+  const sv=ativos.reduce((a,x)=>a+valorSit(x),0);
   const nInat=its.length-ativos.length;
+  const abate=sinal(sit)<0;
   const seta=k=>fichaSort.k===k?(fichaSort.d>0?" ▲":" ▼"):"";
   return `<div class="secao ${t.cls}">
     <div class="stitulo">${t.ico} ${sit}
-      <span class="cont">${ativos.length} serviços · ${ativos.filter(x=>x.op==="I").length} inst. / ${ativos.filter(x=>x.op==="R").length} retir.${nInat?" · "+nInat+" fora da análise":""}</span>
-      <span class="stot">${brl(sv)}</span></div>
+      <span class="cont">${ativos.length} serviços · ${ativos.filter(x=>x.op==="I").length} inst. / ${ativos.filter(x=>x.op==="R").length} retir.${
+        nInat?" · "+nInat+" fora da análise":""}${abate?" · abate do pendente":""}</span>
+      <span class="stot">${abate?"− "+brl(Math.abs(sv)):brl(sv)}</span></div>
     <table class="ftbl"><thead><tr>
       <th data-k="cod">Código${seta("cod")}</th><th>Op.</th>
       <th data-k="serv">Serviço${seta("serv")}</th>
@@ -817,14 +829,14 @@ function blocoSituacao(sit,itens){
       <td class="num">${brl(Math.abs(x.vdif))}</td>
       <td class="acao"><button class="mini ${x.inativo?"reativar":""}" data-inat="${x.op}|${x.cod}"
         title="${x.inativo?"Voltar a considerar este serviço":"Tirar este serviço da análise"}">${x.inativo?"Reativar":"Desativar"}</button></td></tr>`).join("")}
-    </tbody><tfoot><tr><th colspan="8">${sit} — total</th><th class="num">${brl(sv)}</th><th></th></tr></tfoot></table></div>`;
+    </tbody><tfoot><tr><th colspan="8">${sit} — total${abate?" (abate do pendente)":""}</th>
+      <th class="num">${abate?"− "+brl(Math.abs(sv)):brl(sv)}</th><th></th></tr></tfoot></table></div>`;
 }
 function vistaConfronto(){
   const L=filtradas(), At=ativas();
   const foco=document.activeElement, chaveFoco=(foco&&foco.dataset&&foco.dataset.ed)||null;
   const p=(PAGOS[0]&&PAGOS[0].cab)||{}, a=(APONT&&APONT.cab)||{};
-  const pend=At.filter(x=>x.sit==="Pendente de pagamento"||x.sit==="Pagamento parcial")
-              .reduce((s,x)=>s+Math.abs(x.vdif),0);
+  const pend=aReceber(At), abate=abatimento(At), liq=liquido(At);
   const conferidos=At.filter(x=>x.sit==="Conferido").length;
   const nEd=L.filter(x=>x.editado).length, nInat=L.filter(x=>x.inativo).length;
   const somaPago=PAGOS.reduce((s,x)=>s+(x.totais.pagar||0),0);
@@ -842,10 +854,13 @@ function vistaConfronto(){
       ${obraPaga()&&obraApont()!=="—"?`<div class="avisoSusp">⚠️ <b>Confira se é a mesma obra:</b> a planilha é da obra <b>${esc(obraApont())}</b> (numeração Teccel) e a medição traz <b>${esc(obraPaga())}</b> (numeração Energisa). O app não tem como cruzar as duas.</div>`:""}
     </div></div>`;
   const secoes=SIT_ORDEM.map(s=>blocoSituacao(s,L.filter(x=>x.sit===s))).join("");
-  const total=`<div class="ftotal"><span>Pendente de pagamento nesta obra
-      <span class="muted" style="font-size:12px;font-weight:500">· ${conferidos} serviços conferidos · ${At.length} serviços na tela${
+  const conta = abate>0.005
+    ? `<span class="muted" style="font-size:12px;font-weight:500">· ${brl(pend)} pendente − ${brl(abate)} pago a mais/sem apontamento</span>`
+    : `<span class="muted" style="font-size:12px;font-weight:500">· nada pago a mais para abater</span>`;
+  const total=`<div class="ftotal"><span>A receber nesta obra ${conta}
+      <span class="muted" style="font-size:12px;font-weight:500;display:block">${conferidos} serviços conferidos · ${At.length} serviços na tela${
       nInat?" · "+nInat+" fora da análise":""}${nEd?" · "+nEd+" com quantidade corrigida":""}</span></span>
-      <b>${brl(pend)}</b></div>`;
+      <b>${brl(liq)}</b></div>`;
   const dica=`<p class="muted" style="font-size:12px;margin:10px 0 0">✎ As quantidades são editáveis: corrija na tabela e todos os
     valores, situações e totais se refazem na hora. O botão <b>Desativar</b> tira o serviço das contas sem apagar a linha.
     As correções ficam guardadas para esta obra neste navegador.</p>`;
@@ -910,20 +925,24 @@ function vistaResumo(){
   const linhas=SIT_ORDEM.map(s=>{
     const it=L.filter(x=>x.sit===s);
     return {sit:s,n:it.length,inst:it.filter(x=>x.op==="I").length,retir:it.filter(x=>x.op==="R").length,
-      va:it.reduce((a,x)=>a+x.va,0),vp:it.reduce((a,x)=>a+x.vp,0),v:it.reduce((a,x)=>a+Math.abs(x.vdif),0)};
+      va:it.reduce((a,x)=>a+x.va,0),vp:it.reduce((a,x)=>a+x.vp,0),
+      v:it.reduce((a,x)=>a+valorSit(x),0), abate:sinal(s)<0};
   }).filter(x=>x.n);
   const t={n:L.length,va:L.reduce((a,x)=>a+x.va,0),vp:L.reduce((a,x)=>a+x.vp,0),
-    v:linhas.reduce((a,x)=>a+x.v,0)};
+    v:liquido(L)};
   $("conteudo").innerHTML=`<div class="scroll"><table><thead><tr>
       <th>Situação</th><th class="num">Serviços</th><th class="num">Instalar</th><th class="num">Retirar</th>
       <th class="num">Apontado</th><th class="num">Pago</th><th class="num">Diferença</th></tr></thead>
     <tbody>${linhas.map(x=>`<tr>
       <td style="color:${SIT_TEMA[x.sit].bar};font-weight:700">${SIT_TEMA[x.sit].ico} ${x.sit}</td>
       <td class="num">${x.n}</td><td class="num">${x.inst}</td><td class="num">${x.retir}</td>
-      <td class="num">${brl(x.va)}</td><td class="num">${brl(x.vp)}</td><td class="num"><b>${brl(x.v)}</b></td></tr>`).join("")}</tbody>
-    <tfoot><tr><th>Total</th><th class="num">${t.n}</th><th class="num"></th><th class="num"></th>
+      <td class="num">${brl(x.va)}</td><td class="num">${brl(x.vp)}</td>
+      <td class="num"><b>${x.abate?"− "+brl(Math.abs(x.v)):brl(x.v)}</b></td></tr>`).join("")}</tbody>
+    <tfoot><tr><th>A receber (líquido)</th><th class="num">${t.n}</th><th class="num"></th><th class="num"></th>
       <th class="num">${brl(t.va)}</th><th class="num">${brl(t.vp)}</th><th class="num">${brl(t.v)}</th></tr></tfoot>
-    </table></div>`;
+    </table></div>
+    <p class="muted" style="font-size:12px;margin:10px 0 0">O que foi <b>pago a mais</b> e o <b>pago sem apontamento</b>
+      entram com sinal negativo: abatem do que há a receber.</p>`;
 }
 
 /* ================= aba: documentos ================= */
@@ -1116,19 +1135,22 @@ function relDados(){
   const secoes=sits.map(sit=>{
     const its=itens.filter(x=>x.sit===sit).sort((a,b)=>
       a.op!==b.op?(a.op==="I"?-1:1):String(a.serv).localeCompare(String(b.serv),"pt-BR"));
-    return {sit,itens:its,total:its.reduce((a,x)=>a+Math.abs(x.vdif),0),
+    /* pago a mais e pago sem apontamento entram negativos: abatem o pendente */
+    return {sit,itens:its,total:its.reduce((a,x)=>a+valorSit(x),0),abate:sinal(sit)<0,
       inst:its.filter(x=>x.op==="I").length,retir:its.filter(x=>x.op==="R").length};
   }).filter(s=>s.itens.length);
   return {sits,det,secoes,itens,
-    total:secoes.reduce((a,s)=>a+s.total,0),
+    total:liquido(itens),
+    pendente:aReceber(itens), abatido:abatimento(itens),
     apontado:itens.reduce((a,x)=>a+x.va,0),
     pago:itens.reduce((a,x)=>a+x.vp,0),
-    porSit:secoes.map(s=>({sit:s.sit,n:s.itens.length,v:s.total}))};
+    porSit:secoes.map(s=>({sit:s.sit,n:s.itens.length,v:s.total,abate:s.abate}))};
 }
 function relResumo(){
   const d=relDados(), el=$("relResumoTxt");
   el.innerHTML = !d.sits.length ? "Selecione ao menos uma situação."
-    : `Vai gerar <b>${d.itens.length} serviços</b> em <b>${d.secoes.length} situação(ões)</b>, somando <b>${brl(d.total)}</b> de diferença.`;
+    : `Vai gerar <b>${d.itens.length} serviços</b> em <b>${d.secoes.length} situação(ões)</b>: `+
+      `${brl(d.pendente)} pendente${d.abatido>0.005?` − ${brl(d.abatido)} pago a mais`:""} = <b>${brl(d.total)}</b> a receber.`;
 }
 function relCabecalho(){
   const f=[], q=$("q").value.trim(), op=$("fop").value, sit=$("fsit").value;
@@ -1142,7 +1164,7 @@ function relCabecalho(){
   const p=(PAGOS[0]&&PAGOS[0].cab)||{};
   return {titulo:"Confronto da obra "+obraApont(),
     sub:`Apontado: fechamento simplificado · Pago: ${PAGOS.length} medição(ões) da Energisa${
-      p.obra?" ("+p.obra+")":""} · Gerado em `+new Date().toLocaleString("pt-BR"),
+      p.obra?" ("+p.obra+")":""}`,
     filtros:f.join(" · ")};
 }
 function relHTML(){
@@ -1153,7 +1175,7 @@ function relHTML(){
       <div class="rsectit" style="background:${t.bg};color:${t.txt};border-bottom:2px solid ${t.bar}">
         <span>${t.ico} ${s.sit}</span>
         <span class="rcont">${s.itens.length} serviços · ${s.inst} inst. / ${s.retir} retir.</span>
-        <span class="rtot">${brl(s.total)}</span></div>
+        <span class="rtot">${s.abate?"− "+brl(Math.abs(s.total)):brl(s.total)}</span></div>
       <table><thead><tr><th>Código</th><th>Op.</th><th>Serviço</th>
         <th class="r">Apontado</th><th class="r">Pago</th><th class="r">Diferença</th>
         <th class="r">Apontado R$</th><th class="r">Pago R$</th><th class="r">Valor</th></tr></thead>
@@ -1162,8 +1184,8 @@ function relHTML(){
         <td>${esc(x.serv)}</td><td class="r">${nnum(x.qa)}</td><td class="r">${nnum(x.qp)}</td>
         <td class="r">${nnum(x.dif)}</td><td class="r">${brl(x.va)}</td><td class="r">${brl(x.vp)}</td>
         <td class="r"><b>${brl(Math.abs(x.vdif))}</b></td></tr>`).join("")}</tbody>
-      <tfoot><tr style="background:${t.bg};color:${t.txt}"><th colspan="8">${s.sit} — total</th>
-        <th class="r">${brl(s.total)}</th></tr></tfoot></table></div>`;
+      <tfoot><tr style="background:${t.bg};color:${t.txt}"><th colspan="8">${s.sit} — total${s.abate?" (abate do pendente)":""}</th>
+        <th class="r">${s.abate?"− "+brl(Math.abs(s.total)):brl(s.total)}</th></tr></tfoot></table></div>`;
   };
   return `<div class="rhead"><h1>${esc(c.titulo)}</h1>
       <div class="sub">${esc(c.sub)}</div>${c.filtros?`<div class="sub">${esc(c.filtros)}</div>`:""}</div>
@@ -1183,11 +1205,11 @@ function relHTML(){
         <span class="rtot">${brl(d.total)}</span></div>
       <table><thead><tr><th>Situação</th><th class="r">Serviços</th><th class="r">Valor</th></tr></thead>
       <tbody>${d.porSit.map(x=>`<tr><td style="color:${SIT_TEMA[x.sit].txt};font-weight:600">${SIT_TEMA[x.sit].ico} ${x.sit}</td>
-        <td class="r">${x.n}</td><td class="r"><b>${brl(x.v)}</b></td></tr>`).join("")}</tbody>
-      <tfoot><tr style="background:#eef2f7"><th>Total</th><th class="r">${d.itens.length}</th>
+        <td class="r">${x.n}</td><td class="r"><b>${x.abate?"− "+brl(Math.abs(x.v)):brl(x.v)}</b></td></tr>`).join("")}</tbody>
+      <tfoot><tr style="background:#eef2f7"><th>A receber (líquido)</th><th class="r">${d.itens.length}</th>
         <th class="r">${brl(d.total)}</th></tr></tfoot></table></div>
     ${d.det?d.secoes.map(secao).join(""):""}
-    <div class="rtotal"><span>Diferença total da obra</span><b>${brl(d.total)}</b></div>`;
+    <div class="rtotal"><span>A receber nesta obra <span style="font-weight:400;font-size:11px;color:#555">(${brl(d.pendente)} pendente${d.abatido>0.005?" − "+brl(d.abatido)+" pago a mais/sem apontamento":""})</span></span><b>${brl(d.total)}</b></div>`;
 }
 
 $("relFechar").onclick=()=>{$("relmodal").hidden=true};
@@ -1217,6 +1239,7 @@ $("relPng").onclick=()=>{
   const el=[];
   el.push(["tit",c.titulo]); el.push(["sub",c.sub]);
   if(c.filtros) el.push(["sub",c.filtros]);
+  el.push(["sub",`${brl(d.pendente)} pendente${d.abatido>0.005?" − "+brl(d.abatido)+" pago a mais/sem apontamento":""} = ${brl(d.total)} a receber`]);
   el.push(["esp",8]);
   el.push(["obra",{obra:obraApont(),desc:[a.local,p.endereco,p.municipioNome].filter(Boolean).join(" · "),
     equipe:[p.empreiteira,p.contrato&&("contrato "+p.contrato)].filter(Boolean).join(" · ")}]);
@@ -1229,7 +1252,7 @@ $("relPng").onclick=()=>{
   if(d.det) d.secoes.forEach(s=>{
     el.push(["esp",10]);
     el.push(["sec",{rot:s.sit,cont:`${s.itens.length} serviços · ${s.inst} inst. / ${s.retir} retir.`,
-      total:s.total,tema:SIT_TEMA[s.sit]}]);
+      total:s.total,abate:s.abate,tema:SIT_TEMA[s.sit]}]);
     el.push(["cab"]);
     s.itens.forEach(x=>el.push(["item",x]));
     el.push(["fim",s]);
@@ -1267,7 +1290,7 @@ $("relPng").onclick=()=>{
       txt(rot,P+12,y-4,t.txt,"800",14);
       g.font="800 14px system-ui,Segoe UI,Arial";
       txt(v.cont,P+24+g.measureText(rot).width,y-4,t.txt,"600",11.5);
-      txt(brl(v.total),W-P-12,y-4,t.txt,"800",15,"right");
+      txt(v.abate?"− "+brl(Math.abs(v.total)):brl(v.total),W-P-12,y-4,t.txt,"800",15,"right");
       zebra=false; continue;
     }
     if(tipo==="cab"||tipo==="cabres"){
@@ -1289,23 +1312,25 @@ $("relPng").onclick=()=>{
       y+=L; if(zebra){g.fillStyle="#f8fafc";g.fillRect(P,y-14,W-2*P,L)} zebra=!zebra;
       const t=SIT_TEMA[v.sit];
       txt(`${t.ico} ${v.sit}`,X.cod,y,t.txt,"600",12);
-      txt(v.n,X.dif,y,"#334155","400",12,"right"); txt(brl(v.v),X.valor,y,"#0f172a","700",12,"right");
+      txt(v.n,X.dif,y,"#334155","400",12,"right");
+      txt(v.abate?"− "+brl(Math.abs(v.v)):brl(v.v),X.valor,y,"#0f172a","700",12,"right");
       continue;
     }
     if(tipo==="totres"){
       y+=L; g.fillStyle="#eef2f7"; g.fillRect(P,y-14,W-2*P,L);
-      txt("Total",X.cod,y,"#0f172a","800",12);
+      txt("A receber (líquido)",X.cod,y,"#0f172a","800",12);
       txt(v.itens.length,X.dif,y,"#0f172a","800",12,"right"); txt(brl(v.total),X.valor,y,"#0f172a","800",12,"right");
       continue;
     }
     if(tipo==="fim"){
       y+=L; const t=SIT_TEMA[v.sit]; g.fillStyle=t.bg; g.fillRect(P,y-14,W-2*P,L);
-      txt(v.sit+" — total",X.cod,y,t.txt,"700",12); txt(brl(v.total),X.valor,y,t.txt,"800",12,"right");
+      txt(v.sit+" — total"+(v.abate?" (abate do pendente)":""),X.cod,y,t.txt,"700",12);
+      txt(v.abate?"− "+brl(Math.abs(v.total)):brl(v.total),X.valor,y,t.txt,"800",12,"right");
       continue;
     }
     if(tipo==="totobra"){
       y+=28; g.strokeStyle="#0284c7"; g.lineWidth=2; g.strokeRect(P,y-19,W-2*P,26);
-      txt("Diferença total da obra",P+12,y-2,"#0f172a","700",13.5);
+      txt("A receber nesta obra",P+12,y-2,"#0f172a","700",13.5);
       txt(brl(v.total),W-P-12,y-2,"#0284c7","800",16,"right"); y+=6; continue;
     }
     /* item */

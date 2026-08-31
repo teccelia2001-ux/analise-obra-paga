@@ -322,6 +322,8 @@ html{-webkit-text-size-adjust:100%}
       </select>
       <select id="fsit"><option value="">Todas as situações</option></select>
       <button class="sec" id="limpar">Limpar</button>
+      <button class="sec" id="btnEdit" hidden></button>
+      <button class="sec" id="btnInat" hidden></button>
       <button id="csv">Exportar CSV</button>
       <button id="btnRel">📄 Gerar relatório</button>
       <button class="sec" id="imprimir">🖨️ Imprimir</button>
@@ -661,6 +663,9 @@ async function lerXLSX(arquivo){
 
 /* ================= estado ================= */
 let PAGOS=[];       /* uma entrada por PDF de medição */
+/* ajustes manuais da obra: quantidade corrigida à mão e serviço tirado da análise.
+   Ficam guardados por obra, então voltam quando os mesmos documentos são recarregados. */
+let EDICOES={}, INATIVOS=new Set();
 let APONT=null;     /* planilha do apontado */
 let vista="conf";
 let fichaSort={k:"serv",d:1};
@@ -694,14 +699,23 @@ function confronto(){
   for(const k of new Set([...ap.keys(),...pg.keys()])){
     const [op,cod]=k.split("|");
     const A=ap.get(k)||{qtd:0,vlr:0,unit:0}, P=pg.get(k)||{qtd:0,vlr:0,unit:0};
+    /* valor unitário de cada lado, para recalcular quando a quantidade é corrigida */
+    const unitA=A.qtd? A.vlr/A.qtd : (A.unit||0);
+    const unitP=P.qtd? P.vlr/P.qtd : (P.unit||0);
+    const ed=EDICOES[k]||{};
+    const cent=n=>Math.round(n*100)/100;
+    let qa=A.qtd, qp=P.qtd, va=A.vlr, vp=P.vlr;
+    if(ed.qa!==undefined){ qa=ed.qa; va=cent(qa*(unitA||unitP)) }
+    if(ed.qp!==undefined){ qp=ed.qp; vp=cent(qp*(unitP||unitA)) }
     let sit;
-    if(A.qtd>0 && P.qtd===0) sit="Pendente de pagamento";
-    else if(A.qtd>P.qtd && P.qtd>0) sit="Pagamento parcial";
-    else if(P.qtd>A.qtd && A.qtd>0) sit="Pago a mais";
-    else if(A.qtd===0 && P.qtd>0) sit="Pago sem apontamento";
+    if(qa>0 && qp===0) sit="Pendente de pagamento";
+    else if(qa>qp && qp>0) sit="Pagamento parcial";
+    else if(qp>qa && qa>0) sit="Pago a mais";
+    else if(qa===0 && qp>0) sit="Pago sem apontamento";
     else sit="Conferido";
-    out.push({op,cod,serv:desc.get(cod)||"",qa:A.qtd,qp:P.qtd,dif:Math.round((A.qtd-P.qtd)*100)/100,
-      va:A.vlr,vp:P.vlr,vdif:Math.round((A.vlr-P.vlr)*100)/100,unit:A.unit||P.unit||0,sit});
+    out.push({op,cod,serv:desc.get(cod)||"",qa,qp,dif:cent(qa-qp),
+      va,vp,vdif:cent(va-vp),unit:unitA||unitP,sit,
+      editado:ed.qa!==undefined||ed.qp!==undefined, inativo:INATIVOS.has(k)});
   }
   return out;
 }
@@ -709,6 +723,31 @@ function filtradas(){
   const q=$("q").value.trim().toLowerCase(), op=$("fop").value, sit=$("fsit").value;
   return confronto().filter(l=>(!op||l.op===op)&&(!sit||l.sit===sit)&&
     (!q||(l.cod+" "+l.serv).toLowerCase().includes(q)));
+}
+/* o que está fora da análise não entra em card, total, relatório nem CSV */
+const ativas=()=>filtradas().filter(l=>!l.inativo);
+
+/* ---------- ajustes manuais ---------- */
+const chaveAjuste=()=>"obra-paga-"+String(obraApont()).replace(/\W+/g,"");
+function carregarAjustes(){
+  try{EDICOES=JSON.parse(LS.get(chaveAjuste()+"-edicoes")||"{}")}catch(e){EDICOES={}}
+  try{INATIVOS=new Set(JSON.parse(LS.get(chaveAjuste()+"-inativos")||"[]"))}catch(e){INATIVOS=new Set()}
+}
+function salvarAjustes(){
+  LS.set(chaveAjuste()+"-edicoes",JSON.stringify(EDICOES));
+  LS.set(chaveAjuste()+"-inativos",JSON.stringify([...INATIVOS]));
+}
+function editarQtd(op,cod,campo,valor){
+  const v=parseFloat(String(valor).replace(",","."));
+  if(isNaN(v)||v<0) return;
+  const k=op+"|"+cod;
+  (EDICOES[k]||(EDICOES[k]={}))[campo]=Math.round(v*100)/100;
+  salvarAjustes(); render();
+}
+function alternarInativo(op,cod){
+  const k=op+"|"+cod;
+  INATIVOS.has(k)?INATIVOS.delete(k):INATIVOS.add(k);
+  salvarAjustes(); render();
 }
 /* o que foi pago a mais abate o pendente: entra com sinal negativo nos totais */
 const sinal=sit=>(sit==="Pago a mais"||sit==="Pago sem apontamento")?-1:1;
@@ -719,7 +758,7 @@ const obraPaga=()=>(PAGOS[0]&&PAGOS[0].cab.obra)||"";
 
 /* ================= cards ================= */
 function desenharCards(){
-  const L=confronto();
+  const L=confronto().filter(x=>!x.inativo);
   const tA=L.reduce((s,x)=>s+x.va,0), tP=L.reduce((s,x)=>s+x.vp,0);
   const pend=L.filter(x=>x.sit==="Pendente de pagamento"||x.sit==="Pagamento parcial");
   const vPend=pend.reduce((s,x)=>s+Math.abs(x.vdif),0);
@@ -746,11 +785,13 @@ function blocoSituacao(sit,itens){
     return (typeof u==="number"&&typeof v==="number"?u-v:String(u).localeCompare(String(v),"pt-BR"))*fichaSort.d;
   });
   if(!its.length) return "";
-  const sv=its.reduce((a,x)=>a+Math.abs(x.vdif),0);
+  const ativos=its.filter(x=>!x.inativo);
+  const sv=ativos.reduce((a,x)=>a+Math.abs(x.vdif),0);
+  const nInat=its.length-ativos.length;
   const seta=k=>fichaSort.k===k?(fichaSort.d>0?" ▲":" ▼"):"";
   return `<div class="secao ${t.cls}">
     <div class="stitulo">${t.ico} ${sit}
-      <span class="cont">${its.length} serviços · ${its.filter(x=>x.op==="I").length} inst. / ${its.filter(x=>x.op==="R").length} retir.</span>
+      <span class="cont">${ativos.length} serviços · ${ativos.filter(x=>x.op==="I").length} inst. / ${ativos.filter(x=>x.op==="R").length} retir.${nInat?" · "+nInat+" fora da análise":""}</span>
       <span class="stot">${brl(sv)}</span></div>
     <table class="ftbl"><thead><tr>
       <th data-k="cod">Código${seta("cod")}</th><th>Op.</th>
@@ -761,22 +802,31 @@ function blocoSituacao(sit,itens){
       <th class="num" data-k="va">Apontado R$${seta("va")}</th>
       <th class="num" data-k="vp">Pago R$${seta("vp")}</th>
       <th class="num" data-k="vdif">Valor${seta("vdif")}</th>
+      <th></th>
     </tr></thead><tbody>
-    ${its.map(x=>`<tr><td>${x.cod}</td>
+    ${its.map(x=>`<tr class="${x.inativo?"inativo":""}${x.editado?" editado":""}">
+      <td>${x.cod}${x.editado?'<span class="mkEd" title="Quantidade corrigida à mão">✎</span>':""}</td>
       <td class="${x.op==="I"?"op-i":"op-r"}">${x.op==="I"?"▲ Inst.":"▼ Retir."}</td>
       <td>${esc(x.serv)}</td>
-      <td class="num">${nnum(x.qa)}</td><td class="num">${nnum(x.qp)}</td>
+      <td class="num"><input class="qtd" type="number" min="0" step="any" value="${x.qa}"
+        data-ed="${x.op}|${x.cod}|qa" title="Quantidade apontada — edite para corrigir"></td>
+      <td class="num"><input class="qtd" type="number" min="0" step="any" value="${x.qp}"
+        data-ed="${x.op}|${x.cod}|qp" title="Quantidade paga — edite para corrigir"></td>
       <td class="num">${nnum(x.dif)}</td>
       <td class="num">${brl(x.va)}</td><td class="num">${brl(x.vp)}</td>
-      <td class="num">${brl(Math.abs(x.vdif))}</td></tr>`).join("")}
-    </tbody><tfoot><tr><th colspan="8">${sit} — total</th><th class="num">${brl(sv)}</th></tr></tfoot></table></div>`;
+      <td class="num">${brl(Math.abs(x.vdif))}</td>
+      <td class="acao"><button class="mini ${x.inativo?"reativar":""}" data-inat="${x.op}|${x.cod}"
+        title="${x.inativo?"Voltar a considerar este serviço":"Tirar este serviço da análise"}">${x.inativo?"Reativar":"Desativar"}</button></td></tr>`).join("")}
+    </tbody><tfoot><tr><th colspan="8">${sit} — total</th><th class="num">${brl(sv)}</th><th></th></tr></tfoot></table></div>`;
 }
 function vistaConfronto(){
-  const L=filtradas();
+  const L=filtradas(), At=ativas();
+  const foco=document.activeElement, chaveFoco=(foco&&foco.dataset&&foco.dataset.ed)||null;
   const p=(PAGOS[0]&&PAGOS[0].cab)||{}, a=(APONT&&APONT.cab)||{};
-  const pend=L.filter(x=>x.sit==="Pendente de pagamento"||x.sit==="Pagamento parcial")
+  const pend=At.filter(x=>x.sit==="Pendente de pagamento"||x.sit==="Pagamento parcial")
               .reduce((s,x)=>s+Math.abs(x.vdif),0);
-  const conferidos=L.filter(x=>x.sit==="Conferido").length;
+  const conferidos=At.filter(x=>x.sit==="Conferido").length;
+  const nEd=L.filter(x=>x.editado).length, nInat=L.filter(x=>x.inativo).length;
   const somaPago=PAGOS.reduce((s,x)=>s+(x.totais.pagar||0),0);
   const ficha=`<div class="fhead"><div>
       <div class="fnum">Obra ${esc(obraApont())}</div>
@@ -793,13 +843,35 @@ function vistaConfronto(){
     </div></div>`;
   const secoes=SIT_ORDEM.map(s=>blocoSituacao(s,L.filter(x=>x.sit===s))).join("");
   const total=`<div class="ftotal"><span>Pendente de pagamento nesta obra
-      <span class="muted" style="font-size:12px;font-weight:500">· ${conferidos} serviços conferidos · ${L.length} serviços na tela</span></span>
+      <span class="muted" style="font-size:12px;font-weight:500">· ${conferidos} serviços conferidos · ${At.length} serviços na tela${
+      nInat?" · "+nInat+" fora da análise":""}${nEd?" · "+nEd+" com quantidade corrigida":""}</span></span>
       <b>${brl(pend)}</b></div>`;
-  $("conteudo").innerHTML=ficha+(secoes||'<div class="vazio muted">Nenhum serviço com os filtros atuais.</div>')+total;
+  const dica=`<p class="muted" style="font-size:12px;margin:10px 0 0">✎ As quantidades são editáveis: corrija na tabela e todos os
+    valores, situações e totais se refazem na hora. O botão <b>Desativar</b> tira o serviço das contas sem apagar a linha.
+    As correções ficam guardadas para esta obra neste navegador.</p>`;
+  $("conteudo").innerHTML=ficha+(secoes||'<div class="vazio muted">Nenhum serviço com os filtros atuais.</div>')+total+dica;
   $("conteudo").querySelectorAll(".ftbl thead").forEach(t=>t.onclick=e=>{
     const k=e.target.closest("th")?.dataset.k; if(!k) return;
     fichaSort={k,d:fichaSort.k===k?-fichaSort.d:1}; render();
   });
+  /* atribuição (e não addEventListener) para não acumular ouvintes a cada redesenho */
+  $("conteudo").onclick=e=>{
+    const b=e.target.closest("button[data-inat]"); if(!b) return;
+    const [op,cod]=b.dataset.inat.split("|"); alternarInativo(op,cod);
+  };
+  $("conteudo").onchange=e=>{
+    const i=e.target.closest("input[data-ed]"); if(!i) return;
+    const [op,cod,campo]=i.dataset.ed.split("|"); editarQtd(op,cod,campo,i.value);
+  };
+  $("conteudo").onkeydown=e=>{
+    const i=e.target.closest("input[data-ed]"); if(!i) return;
+    if(e.key==="Enter"){ e.preventDefault(); i.blur() }
+  };
+  /* o redesenho tira o foco do campo: devolvo com o cursor no fim */
+  if(chaveFoco){
+    const alvo=$("conteudo").querySelector(`input[data-ed="${chaveFoco}"]`);
+    if(alvo){ alvo.focus(); const v=alvo.value; alvo.value=""; alvo.value=v }
+  }
 }
 
 /* ================= aba: itens em tabela ================= */
@@ -815,9 +887,10 @@ function vistaItens(){
   const tA=L.reduce((s,x)=>s+x.va,0), tP=L.reduce((s,x)=>s+x.vp,0);
   $("conteudo").innerHTML=`<div class="scroll"><table id="tbl"><thead><tr>${
     cols.map(c=>`<th class="${c[2]?"num":""}" data-k="${c[0]}">${c[1]}${seta(c[0])}</th>`).join("")}</tr></thead>
-    <tbody>${L.map(x=>`<tr>
+    <tbody>${L.map(x=>`<tr class="${x.inativo?"inativo":""}${x.editado?" editado":""}">
       <td class="${x.op==="I"?"op-i":"op-r"}">${x.op==="I"?"▲ Inst.":"▼ Retir."}</td>
-      <td>${x.cod}</td><td class="trunc" title="${esc(x.serv)}">${esc(x.serv)}</td>
+      <td>${x.cod}${x.editado?'<span class="mkEd" title="Quantidade corrigida à mão">✎</span>':""}</td>
+      <td class="trunc" title="${esc(x.serv)}">${esc(x.serv)}</td>
       <td class="num">${nnum(x.qa)}</td><td class="num">${nnum(x.qp)}</td><td class="num">${nnum(x.dif)}</td>
       <td class="num">${brl(x.va)}</td><td class="num">${brl(x.vp)}</td><td class="num">${brl(x.vdif)}</td>
       <td><span class="tag ${SIT_TEMA[x.sit].tag}">${x.sit}</span></td></tr>`).join("")
@@ -833,7 +906,7 @@ function vistaItens(){
 
 /* ================= aba: resumo ================= */
 function vistaResumo(){
-  const L=filtradas();
+  const L=ativas();
   const linhas=SIT_ORDEM.map(s=>{
     const it=L.filter(x=>x.sit===s);
     return {sit:s,n:it.length,inst:it.filter(x=>x.op==="I").length,retir:it.filter(x=>x.op==="R").length,
@@ -899,6 +972,12 @@ function render(){
     `<b>Pago</b> = ${PAGOS.length} medição(ões) da Energisa${p.dtPagamento?`, paga em ${esc(p.dtPagamento)}`:""}. `+
     `${confronto().length} serviços confrontados por código e operação.`;
 
+  /* botões de desfazer aparecem só quando há o que desfazer */
+  const nEd=Object.keys(EDICOES).length, nInat=INATIVOS.size;
+  const be=$("btnEdit"), bi=$("btnInat");
+  be.hidden=!nEd; be.textContent=`↺ Desfazer ${nEd} quantidade(s) corrigida(s)`;
+  bi.hidden=!nInat; bi.textContent=`↺ Reativar ${nInat} serviço(s) fora da análise`;
+
   document.querySelectorAll(".tabs button").forEach(b=>b.classList.toggle("on",b.dataset.v===vista));
   if(vista==="conf") vistaConfronto();
   else if(vista==="itens") vistaItens();
@@ -909,6 +988,11 @@ document.querySelectorAll(".tabs button").forEach(b=>b.onclick=()=>{vista=b.data
 ["q","fop","fsit"].forEach(id=>$(id).addEventListener("input",render));
 $("fsit").addEventListener("change",render);
 $("limpar").onclick=()=>{$("q").value="";$("fop").value="";$("fsit").value="";render()};
+$("btnEdit").onclick=()=>{
+  if(!confirm("Desfazer todas as quantidades corrigidas à mão?")) return;
+  EDICOES={}; salvarAjustes(); render();
+};
+$("btnInat").onclick=()=>{ INATIVOS.clear(); salvarAjustes(); render() };
 $("imprimir").onclick=()=>window.print();
 
 /* ================= arquivos ================= */
@@ -956,6 +1040,7 @@ async function receber(arqs){
       render(); return;
     }
   }
+  carregarAjustes();   /* correções guardadas desta obra voltam com os documentos */
   atualizarFonte(); render();
 }
 /* um campo só para os dois documentos: o tipo é decidido pelo arquivo, não pelo
@@ -1006,14 +1091,15 @@ function baixar(nome,blob){
   setTimeout(()=>{a.remove();URL.revokeObjectURL(url)},4000);
 }
 function csvConfronto(){
-  const L=filtradas();
+  const L=ativas();
   if(!L.length){alert("Nada para exportar com os filtros atuais.");return}
   const esq=v=>'"'+String(v??"").replace(/"/g,'""')+'"';
   const cab=["Obra","Operacao","Codigo","Servico","Qtd apontada","Qtd paga","Dif qtd",
-    "Valor apontado","Valor pago","Diferenca","Situacao"];
+    "Valor apontado","Valor pago","Diferenca","Situacao","Quantidade corrigida"];
   const linhas=L.map(x=>[obraApont(),x.op==="I"?"Instalar":"Retirar",x.cod,x.serv,
     String(x.qa).replace(".",","),String(x.qp).replace(".",","),String(x.dif).replace(".",","),
-    x.va.toFixed(2).replace(".",","),x.vp.toFixed(2).replace(".",","),x.vdif.toFixed(2).replace(".",","),x.sit]);
+    x.va.toFixed(2).replace(".",","),x.vp.toFixed(2).replace(".",","),x.vdif.toFixed(2).replace(".",","),
+    x.sit,x.editado?"sim":""]);
   baixar(`confronto-obra-${String(obraApont()).replace(/\W+/g,"")}.csv`,
     new Blob(["﻿"+[cab,...linhas].map(l=>l.map(esq).join(";")).join("\r\n")],{type:"text/csv;charset=utf-8"}));
 }
@@ -1026,7 +1112,7 @@ const relSelecionadas=()=>[...document.querySelectorAll("#relOpcoes input:checke
 
 function relDados(){
   const sits=relSelecionadas(), det=$("relDetalhe").checked;
-  const itens=filtradas().filter(x=>sits.includes(x.sit));
+  const itens=ativas().filter(x=>sits.includes(x.sit));
   const secoes=sits.map(sit=>{
     const its=itens.filter(x=>x.sit===sit).sort((a,b)=>
       a.op!==b.op?(a.op==="I"?-1:1):String(a.serv).localeCompare(String(b.serv),"pt-BR"));
@@ -1049,6 +1135,10 @@ function relCabecalho(){
   if(q) f.push('Busca: "'+q+'"');
   if(op) f.push("Operação: "+(op==="I"?"instalar":"retirar"));
   if(sit) f.push("Situação: "+sit);
+  /* o relatório precisa dizer que não é o número puro dos documentos */
+  const nEd=Object.keys(EDICOES).length, nInat=INATIVOS.size;
+  if(nEd) f.push(nEd+" quantidade(s) corrigida(s) à mão");
+  if(nInat) f.push(nInat+" serviço(s) fora da análise");
   const p=(PAGOS[0]&&PAGOS[0].cab)||{};
   return {titulo:"Confronto da obra "+obraApont(),
     sub:`Apontado: fechamento simplificado · Pago: ${PAGOS.length} medição(ões) da Energisa${

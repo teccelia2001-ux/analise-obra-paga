@@ -660,7 +660,8 @@ async function lerXLSX(arquivo){
       if(typeof v==="string") v=v.replace(/&amp;/g,"&").replace(/&lt;/g,"<").replace(/&gt;/g,">").replace(/&quot;/g,'"').replace(/&#39;/g,"'");
       if(v!=="") c[ref]=v;
     }
-    if(Object.keys(c).length) L.push(c);
+    /* nº da linha no Excel, sem virar coluna (não enumerável) */
+    if(Object.keys(c).length){ Object.defineProperty(c,"_r",{value:+m[1]}); L.push(c) }
   }
   return L;
   };
@@ -698,7 +699,7 @@ function interpretarFechamento(L,arquivo){
       if(/:$/.test(prox)) prox="";
       if(/^obra\s*n/i.test(v) && prox) reg.cab.obra=reg.cab.obra||prox;
       else if(/^((valor\s*)?total(\s*geral)?|r\$)\s*:?$/i.test(v) && num(prox)>0){
-        if(!(num(reg.cab.total)>=num(prox))) reg.cab.total=prox;
+        if(!(num(reg.cab.total)>=num(prox))){ reg.cab.total=prox; reg.linhaTotal=c._r }
       }
       else if(/^local/i.test(v) && prox) reg.cab.local=reg.cab.local||prox;
       else if(/in[íi]cio da obra/i.test(v) && prox) reg.cab.inicio=reg.cab.inicio||prox;
@@ -712,9 +713,10 @@ function interpretarFechamento(L,arquivo){
     if(/RETIRAR/i.test(txt) && c[COL.qtd]===undefined){ sec="R"; continue }
     const cod=c[COL.cod]===undefined?"":String(c[COL.cod]).trim();
     if(!ehCodigo(cod) || c[COL.qtd]===undefined) continue;
+    const vPlan=num(c[COL.vlr]), calc=Math.round(num(c[COL.qtd])*num(c[COL.unit])*100)/100;
     reg.itens.push({op:sec||"?",cod,desc:String(c[COL.desc]||"").trim(),
-      qtd:num(c[COL.qtd]), unit:num(c[COL.unit]),
-      vlr:num(c[COL.vlr])||Math.round(num(c[COL.qtd])*num(c[COL.unit])*100)/100});
+      qtd:num(c[COL.qtd]), unit:num(c[COL.unit]), vlr:vPlan||calc,
+      linha:c._r, semValor:!vPlan&&calc>0});
   }
   if(!reg.itens.length) reg.avisos.push(`a planilha tem ${L.length} linhas, mas nenhuma virou serviço (colunas ${COL.cod}/${COL.qtd})`);
   return reg;
@@ -936,7 +938,9 @@ function conferenciaApontado(){
   const sin=v=>(v<0?"− ":"+ ")+brl(Math.abs(v));
   const L=[];
   if(totPlan>0&&Math.abs(lido-totPlan)>0.01)
-    L.push(`<b>as linhas lidas da planilha somam ${brl(lido)}</b>, mas o total escrito nela é ${brl(totPlan)} (diferença ${sin(lido-totPlan)}) — confira em 🔍 O que foi lido se alguma linha ficou de fora ou entrou a mais (aba lida: <b>${esc(APONT.aba||"—")}</b>${APONT.abas&&APONT.abas.length>1?" de "+APONT.abas.map(esc).join(", "):""})`);
+    L.push(...suspeitasPlanilha(lido-totPlan));
+  if(totPlan>0&&Math.abs(lido-totPlan)>0.01)
+    L.unshift(`<b>as linhas lidas da planilha somam ${brl(lido)}</b>, mas o total escrito nela é ${brl(totPlan)} (diferença ${sin(lido-totPlan)}) — confira em 🔍 O que foi lido se alguma linha ficou de fora ou entrou a mais (aba lida: <b>${esc(APONT.aba||"—")}</b>${APONT.abas&&APONT.abas.length>1?" de "+APONT.abas.map(esc).join(", "):""})`);
   if(Math.abs(parte.ed)>=0.01) L.push(`quantidades corrigidas à mão: ${sin(parte.ed)}`);
   if(Math.abs(parte.add)>=0.01) L.push(`serviços acrescentados à mão: ${sin(parte.add)}`);
   if(Math.abs(parte.inat)>=0.01) L.push(`serviços desativados: ${sin(parte.inat)}`);
@@ -947,6 +951,36 @@ function conferenciaApontado(){
   return `<div class="avisoSusp" style="margin-top:8px">⚠️ <b>Apontado na tela ${brl(card)} × planilha ${brl(ref)}</b>${
     totPlan>0?"":" (soma das linhas — a planilha não traz um total que o app reconheça)"}:<br>· ${L.join("<br>· ")}${
     parte.ed||parte.add||parte.inat?'<br>Para voltar ao apontado original use <b>↺ Restaurar obra</b>.':""}</div>`;
+}
+
+/* linhas da planilha que explicam a diferença entre a soma lida e o total escrito */
+function suspeitasPlanilha(dif){
+  const its=APONT.itens, out=[], perto=v=>Math.abs(Math.abs(v)-Math.abs(dif))<0.015;
+  const rot=x=>`linha ${x.linha} do Excel — ${x.op==="I"?"instalar":x.op==="R"?"retirar":"fora de INSTALAR/RETIRAR"} ${esc(x.cod)} ${esc(x.desc)} (${nnum(x.qtd)} × ${brl(x.unit)} = ${brl(x.vlr)})`;
+  const soma=a=>a.reduce((s,x)=>s+x.vlr,0);
+  /* a diferença é exatamente uma linha, ou duas linhas iguais (lançamento repetido) */
+  const iguais=its.filter(x=>perto(x.vlr));
+  if(iguais.length) out.push(`<b>a diferença é exatamente o valor de</b>: ${iguais.map(rot).join(" <b>ou</b> ")}`);
+  const grupos={};
+  for(const x of its){ const k=x.op+"|"+x.cod; (grupos[k]=grupos[k]||[]).push(x) }
+  const repet=Object.values(grupos).filter(g=>g.length>1);
+  if(repet.length) out.push(`serviço lançado mais de uma vez: ${repet.map(g=>g.map(rot).join(" + ")).join("; ")}`);
+  const sem=its.filter(x=>x.semValor);
+  if(sem.length) out.push(`${perto(soma(sem))?"<b>= a diferença</b> · ":""}${sem.length} linha(s) <b>sem valor na coluna de total</b> — o app calculou quantidade × unitário, mas a planilha pode estar contando zero: ${sem.map(rot).join("; ")}`);
+  const fora=its.filter(x=>x.op==="?");
+  if(fora.length) out.push(`${perto(soma(fora))?"<b>= a diferença</b> · ":""}${fora.length} linha(s) fora das seções INSTALAR/RETIRAR: ${fora.map(rot).join("; ")}`);
+  if(APONT.linhaTotal){
+    const dep=its.filter(x=>x.linha>APONT.linhaTotal);
+    if(dep.length) out.push(`${perto(soma(dep))?"<b>= a diferença</b> · ":""}${dep.length} linha(s) <b>abaixo do total</b> (linha ${APONT.linhaTotal}), que a planilha não soma: ${dep.map(rot).join("; ")}`);
+  }
+  for(const [op,nome] of [["I","INSTALAR"],["R","RETIRAR"]]){
+    const v=soma(its.filter(x=>x.op===op));
+    if(v&&perto(v)) out.push(`<b>a diferença é exatamente a seção ${nome}</b> (${brl(v)}) — o total da planilha não a inclui`);
+  }
+  const mult=its.filter(x=>x.unit&&Math.abs(x.qtd*x.unit-x.vlr)>0.015&&!x.semValor);
+  if(mult.length) out.push(`linha(s) em que o total não é quantidade × unitário: ${mult.map(rot).join("; ")}`);
+  if(!out.length) out.push(`nenhuma linha sozinha explica a diferença — mande o print de 🔍 O que foi lido (lista cada linha com o nº dela no Excel)`);
+  return out;
 }
 
 /* ================= cards ================= */
@@ -1319,7 +1353,7 @@ $("btnLido").onclick=()=>{
       `linhas na planilha: ${APONT.linhas} · colunas: ${JSON.stringify(APONT.colunas)}`,
       `soma das linhas lidas: ${brl(APONT.itens.reduce((s,x)=>s+x.vlr,0))} · total escrito na planilha: ${APONT.cab.total?brl(num(APONT.cab.total)):"não encontrado"}`,
       `cabeçalho: ${JSON.stringify(APONT.cab)}`,
-      ...APONT.itens.map(i=>`  ${i.op} ${i.cod} ${i.desc} · qtd ${i.qtd} · unit ${i.unit} · total ${i.vlr}`));
+      ...APONT.itens.map(i=>`  linha ${i.linha} · ${i.op} ${i.cod} ${i.desc} · qtd ${i.qtd} · unit ${i.unit} · total ${i.vlr}${i.semValor?" (sem valor na planilha — calculado)":""}`));
     (APONT.avisos||[]).forEach(a=>L.push("  ⚠️ "+a));
   } else L.push("(sem planilha do apontado)");
   for(const x of PAGOS){

@@ -26,24 +26,36 @@ function zip(arqs){
 }
 /* fechamento simplificado: OBRA Nº / LOCAL, cabeçalho, INSTALAR, RETIRAR.
    comValor: "formula" (total =E*F, como o Excel grava), "nada" (só quantidade) */
-function fechamento(obra,itens,comValor){
+/* opc.total: põe no rodapé "R$ | total" (como o fechamento real, ao lado de ENGENHARIA)
+   opc.outraAba: itens de uma aba que fica em sheet1.xml mas vem DEPOIS no Excel */
+function fechamento(obra,itens,comValor,opc={}){
   const S=[],si=t=>{let i=S.indexOf(t);if(i<0){S.push(t);i=S.length-1}return i};
+  const aba=its=>{
   const s=(r,t)=>`<c r="${r}" t="s"><v>${si(t)}</v></c>`, n=(r,v)=>`<c r="${r}"><v>${v}</v></c>`;
   const rows=[s("A1","FECHAMENTO SIMPLIFICADO"),s("A2","OBRA Nº:")+'<c r="B2" s="1"/>'+s("C2",obra),
     s("A3","LOCAL:")+s("C3","RUA VITORIA · SAO BENTO"),
     s("B4","CÓDIGO")+s("D4","DESCRIÇÃO")+s("E4","QUANTIDADE")+s("F4","VALOR UNIT")+s("G4","VALOR TOTAL")];
   for(const op of ["I","R"]){
     rows.push(s("A"+(rows.length+1),op==="I"?"INSTALAR":"RETIRAR"));
-    for(const it of itens.filter(x=>x.op===op)){
+    for(const it of its.filter(x=>x.op===op)){
       const r=rows.length+1;
       let c=n("B"+r,it.cod)+s("D"+r,it.desc)+n("E"+r,it.qtd);
       if(comValor==="formula") c+=n("F"+r,it.unit)+`<c r="G${r}" s="2"><f>E${r}*F${r}</f><v>${it.qtd*it.unit}</v></c>`;
       rows.push(c);
     }
   }
-  const sheet=`<?xml version="1.0"?><worksheet><sheetData>${rows.map((c,i)=>`<row r="${i+1}">${c}</row>`).join("")}</sheetData></worksheet>`;
-  return zip({"xl/worksheets/sheet1.xml":sheet,
-    "xl/sharedStrings.xml":`<?xml version="1.0"?><sst>${S.map(t=>`<si><t>${t}</t></si>`).join("")}</sst>`});
+  if(opc.total){ const r=rows.length+2, t=its.reduce((a,x)=>a+x.qtd*x.unit,0);
+    rows.push(""); rows.push(s("B"+r,"ENGENHARIA")); rows.push(s("A"+(r+1),"R$")+`<c r="B${r+1}" s="3"><f>SUM(G6:G${r-2})</f><v>${t}</v></c>`); }
+  return `<?xml version="1.0"?><worksheet><sheetData>${rows.map((c,i)=>c?`<row r="${i+1}">${c}</row>`:"").join("")}</sheetData></worksheet>`;
+  };
+  const arqs={};
+  if(opc.outraAba){
+    arqs["xl/worksheets/sheet1.xml"]=aba(opc.outraAba); arqs["xl/worksheets/sheet2.xml"]=aba(itens);
+    arqs["xl/workbook.xml"]=`<?xml version="1.0"?><workbook xmlns:r="r"><sheets><sheet name="FECHAMENTO" sheetId="2" r:id="rId2"/><sheet name="RASCUNHO ANTIGO" sheetId="1" r:id="rId1"/></sheets></workbook>`;
+    arqs["xl/_rels/workbook.xml.rels"]=`<?xml version="1.0"?><Relationships><Relationship Id="rId1" Target="worksheets/sheet1.xml"/><Relationship Id="rId2" Target="worksheets/sheet2.xml"/></Relationships>`;
+  } else arqs["xl/worksheets/sheet1.xml"]=aba(itens);
+  arqs["xl/sharedStrings.xml"]=`<?xml version="1.0"?><sst>${S.map(t=>`<si><t>${t}</t></si>`).join("")}</sst>`;
+  return zip(arqs);
 }
 
 /* ---------- fórmula do app de obras pagas (calcularConfronto), reescrita à parte ---------- */
@@ -206,6 +218,28 @@ const perto=(a,b)=>Math.abs(a-b)<0.006;
     const csv=fs.readFileSync(await dc.path(),"utf8");
     ok(csv.split("\r\n").length===1+Object.keys(a.linhas).length,"CSV com uma linha por serviço");
     ok(!pg.erros.length,"sem erro na página "+(pg.erros.join(" | ")));
+    await pg.close(); }
+
+  console.log("\n8) Total da planilha ao lado de \"R$\": o app confere o apontado com ele");
+  { const pg=await abrir(); await carregar(pg,fechamento(OBRA,APONT,"formula",{total:true}),[MEDICAO]);
+    const esperado=APONT.reduce((s,x)=>s+x.qtd*x.unit,0);
+    const tot=await pg.evaluate(()=>num(APONT.cab.total));
+    ok(perto(tot,esperado),`total lido da planilha: ${tot.toFixed(2)}`);
+    ok(await pg.locator("#avisoConf >> text=Apontado confere com o total da planilha").count()===1,"aviso ✔ apontado confere");
+    await pg.fill('input[data-ed="I|60134|qa"]',"40"); await pg.press('input[data-ed="I|60134|qa"]',"Enter");
+    const txt=await pg.locator("#avisoConf").innerText();
+    ok(/quantidades corrigidas à mão: − R\$ 375,80/.test(txt),"quantidade corrigida aparece como causa da diferença (− 2 × 187,90)");
+    await pg.click("#btnRestaurar");
+    ok(await pg.locator("#avisoConf >> text=Apontado confere com o total da planilha").count()===1,"Restaurar obra volta a bater com a planilha");
+    await pg.close(); }
+
+  console.log("\n9) Pasta com duas abas: lê a primeira do Excel, não o arquivo sheet1.xml");
+  { const pg=await abrir();
+    const antiga=APONT.map(x=>({...x,qtd:x.qtd+1}));
+    await carregar(pg,fechamento(OBRA,APONT,"formula",{total:true,outraAba:antiga}),[MEDICAO]);
+    const r=await pg.evaluate(()=>({aba:APONT.aba,soma:APONT.itens.reduce((s,x)=>s+x.vlr,0)}));
+    ok(r.aba==="FECHAMENTO",`aba lida: ${r.aba}`);
+    ok(perto(r.soma,APONT.reduce((s,x)=>s+x.qtd*x.unit,0)),`soma da aba certa: ${r.soma.toFixed(2)}`);
     await pg.close(); }
 
   await b.close();

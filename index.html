@@ -619,13 +619,28 @@ async function lerXLSX(arquivo){
     const out=await inflar(d,["deflate-raw"]);
     return out? UTF8.decode(out) : "";
   };
-  const nomeSheet=Object.keys(arqs).find(k=>/worksheets\/sheet1\.xml$/.test(k))||"xl/worksheets/sheet1.xml";
+  /* abas na ordem em que aparecem no Excel (workbook.xml) — o arquivo
+     sheet1.xml nem sempre é a primeira aba */
+  const wb=await ler("xl/workbook.xml"), rels=await ler("xl/_rels/workbook.xml.rels");
+  const alvo={};
+  for(const r of rels.matchAll(/<Relationship\b[^>]*>/g)){
+    const id=(r[0].match(/\bId="([^"]+)"/)||[])[1], t=(r[0].match(/\bTarget="([^"]+)"/)||[])[1];
+    if(id&&t) alvo[id]=t.replace(/^\/?(xl\/)?/,"xl/");
+  }
+  const desX=t=>t.replace(/&amp;/g,"&").replace(/&lt;/g,"<").replace(/&gt;/g,">").replace(/&quot;/g,'"').replace(/&#39;/g,"'");
+  let abas=[...wb.matchAll(/<sheet\b[^>]*>/g)].map(m=>({
+    nome:desX((m[0].match(/\bname="([^"]*)"/)||[])[1]||""),
+    oculta:/\bstate="(hidden|veryHidden)"/.test(m[0]),
+    arq:alvo[(m[0].match(/\br:id="([^"]+)"/)||[])[1]]})).filter(a=>a.arq&&arqs[a.arq]);
+  if(!abas.length) abas=Object.keys(arqs).filter(k=>/worksheets\/sheet\d+\.xml$/.test(k))
+    .sort((a,b)=>parseInt(a.match(/(\d+)\.xml/)[1])-parseInt(b.match(/(\d+)\.xml/)[1]))
+    .map((k,i)=>({nome:"aba "+(i+1),oculta:false,arq:k}));
   const nomeSS=Object.keys(arqs).find(k=>/sharedStrings\.xml$/.test(k))||"xl/sharedStrings.xml";
   const ss=await ler(nomeSS);
   const S=[...ss.matchAll(/<si>([\s\S]*?)<\/si>/g)].map(m=>
     [...m[1].matchAll(/<t[^>]*>([\s\S]*?)<\/t>/g)].map(x=>x[1]).join("")
       .replace(/&amp;/g,"&").replace(/&lt;/g,"<").replace(/&gt;/g,">").replace(/&quot;/g,'"').replace(/&#39;/g,"'"));
-  const sh=await ler(nomeSheet);
+  const linhasDaAba=sh=>{
   const L=[];
   for(const m of sh.matchAll(/<row[^>]*r="(\d+)"[^>]*>([\s\S]*?)<\/row>/g)){
     const c={};
@@ -647,8 +662,23 @@ async function lerXLSX(arquivo){
     }
     if(Object.keys(c).length) L.push(c);
   }
-
-  const reg={arquivo:arquivo.name,linhas:L.length,itens:[],cab:{},avisos:[]};
+  return L;
+  };
+  /* a primeira aba visível que tenha serviços; sem nenhuma, a primeira visível */
+  let reg=null;
+  for(const a of abas.filter(a=>!a.oculta).concat(abas.filter(a=>a.oculta))){
+    const r=interpretarFechamento(linhasDaAba(await ler(a.arq)),arquivo.name);
+    r.aba=a.nome;
+    if(!reg) reg=r;
+    if(r.itens.length){ reg=r; break }
+  }
+  if(!reg) throw new Error("a planilha não tem nenhuma aba legível");
+  reg.abas=abas.map(a=>a.nome+(a.oculta?" (oculta)":""));
+  return reg;
+}
+/* linhas de uma aba → serviços do fechamento simplificado */
+function interpretarFechamento(L,arquivo){
+  const reg={arquivo,linhas:L.length,itens:[],cab:{},avisos:[]};
   /* colunas pelo cabeçalho da planilha; B/D/E/F/G é só o padrão do fechamento */
   let COL={cod:"B",desc:"D",qtd:"E",unit:"F",vlr:"G"};
   for(const c of L){
@@ -667,7 +697,9 @@ async function lerXLSX(arquivo){
       /* campo vazio na planilha faz o rótulo seguinte cair no lugar do valor */
       if(/:$/.test(prox)) prox="";
       if(/^obra\s*n/i.test(v) && prox) reg.cab.obra=reg.cab.obra||prox;
-      else if(/^total\s*:?$/i.test(v) && prox) reg.cab.total=reg.cab.total||prox;
+      else if(/^((valor\s*)?total(\s*geral)?|r\$)\s*:?$/i.test(v) && num(prox)>0){
+        if(!(num(reg.cab.total)>=num(prox))) reg.cab.total=prox;
+      }
       else if(/^local/i.test(v) && prox) reg.cab.local=reg.cab.local||prox;
       else if(/in[íi]cio da obra/i.test(v) && prox) reg.cab.inicio=reg.cab.inicio||prox;
       else if(/t[ée]rmino da obra/i.test(v) && prox) reg.cab.termino=reg.cab.termino||prox;
@@ -771,7 +803,7 @@ function confronto(){
     else if(qa===0 && qp>0) sit="Pago sem apontamento";
     else sit="Conferido";
     out.push({op,cod,serv:(add.has(k)&&(ADICIONADOS.find(i=>i.op===op&&i.cod===cod)||{}).serv)||desc.get(cod)||"",qa,qp,dif:cent(qa-qp),
-      va,vp,vdif:cent((qa-qp)*unit),unit,semPreco:!unit&&qa!==qp,sit,
+      va,vp,vaPlan:add.has(k)?0:cent(A.vlr),vdif:cent((qa-qp)*unit),unit,semPreco:!unit&&qa!==qp,sit,
       editado:ed.qa!==undefined||ed.qp!==undefined, inativo:INATIVOS.has(k), acrescentado:add.has(k)});
   }
   return out;
@@ -886,6 +918,37 @@ const abatimento=arr=>arr.filter(x=>x.sit==="Pago a mais"||x.sit==="Pago sem apo
 const obraApont=()=>(APONT&&APONT.cab.obra)||"—";
 const obraPaga=()=>(PAGOS[0]&&PAGOS[0].cab.obra)||"";
 
+/* ================= conferência do apontado com a planilha ================= */
+/* o card Apontado soma os serviços como estão na ficha; aqui sai de onde vem
+   cada real de diferença para o total escrito na planilha */
+function conferenciaApontado(){
+  if(!APONT) return "";
+  const cent=n=>Math.round(n*100)/100;
+  const totPlan=num(APONT.cab.total), lido=cent(APONT.itens.reduce((s,x)=>s+x.vlr,0));
+  const C=confronto(), card=cent(C.filter(x=>!x.inativo).reduce((s,x)=>s+x.va,0));
+  const parte={ed:0,add:0,inat:0,preco:0};
+  for(const x of C){
+    const d=(x.inativo?0:x.va)-x.vaPlan;
+    if(Math.abs(d)<0.005) continue;
+    if(x.inativo) parte.inat+=d; else if(x.acrescentado) parte.add+=d;
+    else if(x.editado) parte.ed+=d; else parte.preco+=d;
+  }
+  const sin=v=>(v<0?"− ":"+ ")+brl(Math.abs(v));
+  const L=[];
+  if(totPlan>0&&Math.abs(lido-totPlan)>0.01)
+    L.push(`<b>as linhas lidas da planilha somam ${brl(lido)}</b>, mas o total escrito nela é ${brl(totPlan)} (diferença ${sin(lido-totPlan)}) — confira em 🔍 O que foi lido se alguma linha ficou de fora ou entrou a mais (aba lida: <b>${esc(APONT.aba||"—")}</b>${APONT.abas&&APONT.abas.length>1?" de "+APONT.abas.map(esc).join(", "):""})`);
+  if(Math.abs(parte.ed)>=0.01) L.push(`quantidades corrigidas à mão: ${sin(parte.ed)}`);
+  if(Math.abs(parte.add)>=0.01) L.push(`serviços acrescentados à mão: ${sin(parte.add)}`);
+  if(Math.abs(parte.inat)>=0.01) L.push(`serviços desativados: ${sin(parte.inat)}`);
+  if(Math.abs(parte.preco)>=0.01) L.push(`linhas sem valor na planilha, calculadas pelo preço pago: ${sin(parte.preco)}`);
+  const ref=totPlan>0?totPlan:lido;
+  if(Math.abs(card-ref)<0.01&&!L.length)
+    return totPlan>0?` <span style="color:var(--ok-txt)">✔ Apontado confere com o total da planilha (${brl(totPlan)}).</span>`:"";
+  return `<div class="avisoSusp" style="margin-top:8px">⚠️ <b>Apontado na tela ${brl(card)} × planilha ${brl(ref)}</b>${
+    totPlan>0?"":" (soma das linhas — a planilha não traz um total que o app reconheça)"}:<br>· ${L.join("<br>· ")}${
+    parte.ed||parte.add||parte.inat?'<br>Para voltar ao apontado original use <b>↺ Restaurar obra</b>.':""}</div>`;
+}
+
 /* ================= cards ================= */
 function desenharCards(){
   const L=confronto().filter(x=>!x.inativo);
@@ -897,7 +960,7 @@ function desenharCards(){
   const card=(lbl,val,cls,dica)=>`<div class="card ${cls||""}"${dica?` title="${esc(dica)}"`:""}><div class="lbl">${lbl}</div><div class="val">${val}</div></div>`;
   $("cards").innerHTML=
     card("Obra",esc(obraApont()))+
-    card("Apontado",brl(tA))+
+    card("Apontado",brl(tA),"",APONT&&num(APONT.cab.total)?"Total escrito na planilha: "+brl(num(APONT.cab.total)):"")+
     card("Pago",brl(tP))+
     card(`Pendente · ${pend.length} serviços`,brl(vPend),pend.length?"bad":"ok",
       "Soma do que foi apontado e não foi pago (pendente + parcial), antes do abatimento.")+
@@ -1149,9 +1212,10 @@ function render(){
 
   const p=(PAGOS[0]&&PAGOS[0].cab)||{};
   const av=$("avisoConf"); av.hidden=false;
+  const confAp=conferenciaApontado();
   av.innerHTML=`⚖️ <b>Apontado</b> = fechamento simplificado da obra ${esc(obraApont())} · `+
     `<b>Pago</b> = ${PAGOS.length} medição(ões) da Energisa${p.dtPagamento?`, paga em ${esc(p.dtPagamento)}`:""}. `+
-    `${confronto().length} serviços confrontados por código e operação.`;
+    `${confronto().length} serviços confrontados por código e operação.`+confAp;
 
   /* botões de desfazer aparecem só quando há o que desfazer */
   const nEd=Object.keys(EDICOES).length, nInat=INATIVOS.size;
@@ -1251,7 +1315,9 @@ $("btnLido").onclick=()=>{
   const L=[];
   if(APONT){
     L.push(`=== APONTADO · ${APONT.arquivo} ===`,
+      `aba lida: ${APONT.aba||"—"}${APONT.abas?" · abas do arquivo: "+APONT.abas.join(", "):""}`,
       `linhas na planilha: ${APONT.linhas} · colunas: ${JSON.stringify(APONT.colunas)}`,
+      `soma das linhas lidas: ${brl(APONT.itens.reduce((s,x)=>s+x.vlr,0))} · total escrito na planilha: ${APONT.cab.total?brl(num(APONT.cab.total)):"não encontrado"}`,
       `cabeçalho: ${JSON.stringify(APONT.cab)}`,
       ...APONT.itens.map(i=>`  ${i.op} ${i.cod} ${i.desc} · qtd ${i.qtd} · unit ${i.unit} · total ${i.vlr}`));
     (APONT.avisos||[]).forEach(a=>L.push("  ⚠️ "+a));

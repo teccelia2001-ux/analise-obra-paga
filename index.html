@@ -365,7 +365,7 @@ html{-webkit-text-size-adjust:100%}
       <p class="muted" style="margin-top:0;font-size:12.5px">Marque o que deve aparecer no relatório. Ele respeita os filtros atuais da tela.</p>
       <div id="relOpcoes">
         <label><input type="checkbox" value="Pendente de pagamento" checked> 🔴 Pendente de pagamento</label>
-        <label><input type="checkbox" value="Pagamento parcial" checked> 🟠 Pagamento parcial</label>
+        <label><input type="checkbox" value="Pagamento parcial" checked> 🟠 Divergência</label>
         <label><input type="checkbox" value="Pago a mais"> 🟣 Pago a mais</label>
         <label><input type="checkbox" value="Pago sem apontamento"> 🔵 Pago sem apontamento</label>
         <label><input type="checkbox" value="Conferido"> ✅ Conferido (apontado = pago)</label>
@@ -711,6 +711,17 @@ const SIT_TEMA={
   "Conferido":            {ico:"✅",bg:"#dcfce7",txt:"#15803d",bar:"#16a34a",cls:"ok",tag:"s-ok"}
 };
 
+/* ================= preços ================= */
+/* unitário pago de cada serviço, aprendido de toda medição já carregada neste
+   navegador — como no app de obras, o preço vem do que foi pago; assim o serviço
+   pendente (que não está nesta medição) também tem valor */
+let PRECOS={};
+try{PRECOS=JSON.parse(LS.get("obra-paga-precos")||"{}")}catch(e){PRECOS={}}
+function aprenderPrecos(itens){
+  for(const it of itens) if(it.qtd>0&&it.vlr>0) PRECOS[it.op+"|"+it.cod]=Math.round(it.vlr/it.qtd*10000)/10000;
+  LS.set("obra-paga-precos",JSON.stringify(PRECOS));
+}
+
 /* ================= confronto ================= */
 /* uma linha por operação + código, somando as parcelas pagas */
 function confronto(){
@@ -742,16 +753,17 @@ function confronto(){
     /* valor unitário de cada lado, para recalcular quando a quantidade é corrigida */
     const unitA=(A.qtd&&A.vlr)? A.vlr/A.qtd : (A.unit||0);
     const unitP=(P.qtd&&P.vlr)? P.vlr/P.qtd : (P.unit||0);
-    /* preço do serviço: o da medição (o que a Energisa paga); sem ele, o do apontado */
-    const unit=unitP||unitA;
+    /* preço do serviço: o pago nesta medição; sem ele, o pago em outra medição
+       já carregada; sem os dois, o do apontado (mesma regra do app de obras) */
+    const unit=unitP||PRECOS[k]||unitA;
     const ed=EDICOES[k]||{};
     const cent=n=>Math.round(n*100)/100;
     let qa=A.qtd, qp=P.qtd, va=A.vlr, vp=P.vlr;
     if(ed.qa!==undefined) qa=ed.qa;
     if(ed.qp!==undefined) qp=ed.qp;
     /* lado sem valor (ou quantidade corrigida): quantidade × unitário */
-    if(ed.qa!==undefined||(!va&&qa)) va=cent(qa*(unitA||unitP));
-    if(ed.qp!==undefined||(!vp&&qp)) vp=cent(qp*(unitP||unitA));
+    if(ed.qa!==undefined||(!va&&qa)) va=cent(qa*(unitA||unit));
+    if(ed.qp!==undefined||(!vp&&qp)) vp=cent(qp*(unitP||unit));
     let sit;
     if(qa>0 && qp===0) sit="Pendente de pagamento";
     else if(qa>qp && qp>0) sit="Pagamento parcial";
@@ -759,7 +771,7 @@ function confronto(){
     else if(qa===0 && qp>0) sit="Pago sem apontamento";
     else sit="Conferido";
     out.push({op,cod,serv:(add.has(k)&&(ADICIONADOS.find(i=>i.op===op&&i.cod===cod)||{}).serv)||desc.get(cod)||"",qa,qp,dif:cent(qa-qp),
-      va,vp,vdif:cent((qa-qp)*unit),unit,sit,
+      va,vp,vdif:cent((qa-qp)*unit),unit,semPreco:!unit&&qa!==qp,sit,
       editado:ed.qa!==undefined||ed.qp!==undefined, inativo:INATIVOS.has(k), acrescentado:add.has(k)});
   }
   return out;
@@ -934,7 +946,7 @@ function blocoSituacao(sit,itens){
       <td>${x.cod}${x.editado?'<span class="mkEd" title="Quantidade editada">✎</span>':""}${x.acrescentado?'<span class="mkAdd" title="Serviço acrescentado à mão — não veio do apontamento">➕</span>':""}</td><td class="${x.op==="I"?"op-i":"op-r"}">${x.op==="I"?"▲ Inst.":"▼ Retir."}</td><td>${esc(x.serv)}</td>
       <td class="num"><input class="qtd" type="number" min="0" step="any" value="${x.qa}" data-ed="${k}|qa" title="Quantidade apontada — edite se precisar corrigir"></td>
       <td class="num"><input class="qtd" type="number" min="0" step="any" value="${x.qp}" data-ed="${k}|qp" title="Quantidade paga — edite se precisar corrigir"></td>
-      <td class="num">${nnum(x.dif)}</td><td class="num">${brl(Math.abs(x.vdif))}</td>
+      <td class="num">${nnum(x.dif)}</td><td class="num">${x.semPreco?'<span class="tag s-nao" title="Nem a medição, nem outra medição carregada, nem a planilha trazem o preço deste serviço">sem preço</span>':brl(Math.abs(x.vdif))}</td>
       <td class="acao"><button class="mini ${x.inativo?"reativar":""}" data-inat="${k}" title="${x.inativo?"Voltar a considerar este serviço":"Tirar este serviço da análise"}">${x.inativo?"Reativar":"Desativar"}</button>${x.acrescentado?`<button class="mini perigo" data-rmadd="${k}" title="Excluir este serviço acrescentado">Excluir</button>`:""}</td></tr>`}).join("")}
     </tbody><tfoot><tr><th colspan="7">${titulo} — total</th><th class="num">${brl(sv)}</th><th></th></tr></tfoot></table></div>`;
 }
@@ -987,7 +999,9 @@ function vistaConfronto(){
       nConfObra?` · <b style="font-size:inherit;color:inherit">✔ ${nConfObra} de ${Todas.length} já conferidos na obra</b>`:""}${
       abate>0.005?`<span style="display:block">a receber líquido ${brl(liq)} — ${brl(pend)} pendente − ${brl(abate)} pago a mais/sem apontamento</span>`:""}</span></span><b>${brl(pend)}</b></div>
     ${nConfObra?`<div style="text-align:right;margin-top:6px"><button class="mini" data-limpaconf="1">Desmarcar os conferidos na obra</button></div>`:""}`;
-  $("conteudo").innerHTML=ficha+add+(secoes||'<div class="vazio muted">Nenhum serviço com os filtros atuais.</div>')+total;
+  const nSemPreco=L.filter(x=>x.semPreco&&!x.inativo).length;
+  const avisoPreco=nSemPreco?`<div class="avisoSusp" style="margin-top:14px">⚠️ <b>${nSemPreco} serviço(s) sem preço</b> — não estão nesta medição, em nenhuma outra medição já carregada, e a planilha não traz o valor unitário. Entram com R$ 0,00 até o preço aparecer (carregue uma medição que tenha esse serviço).</div>`:"";
+  $("conteudo").innerHTML=ficha+avisoPreco+add+(secoes||'<div class="vazio muted">Nenhum serviço com os filtros atuais.</div>')+total;
   $("conteudo").querySelectorAll(".ftbl thead").forEach(t=>t.onclick=e=>{
     const k=e.target.closest("th")?.dataset.k; if(!k) return;
     fichaSort={k,d:fichaSort.k===k?-fichaSort.d:1}; render();
@@ -1196,6 +1210,7 @@ async function receber(arqs){
       if(tipo==="pdf"){
         const r=await lerPDF(a);
         PAGOS=PAGOS.filter(p=>p.arquivo!==r.arquivo).concat([r]);
+        aprenderPrecos(r.itens);
       }else if(tipo==="xlsx"){
         APONT=await lerXLSX(a);
       }else if(tipo==="xls-antigo"){

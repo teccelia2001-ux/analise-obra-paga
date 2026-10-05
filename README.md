@@ -12,3 +12,12 @@ Página única, sem dependências e sem servidor. **Os arquivos são lidos dentr
 navegador — nada é enviado para lugar nenhum.**
 
 Acesso: https://teccelia2001-ux.github.io/analise-obra-paga/
+
+## Testes
+
+    node testes/confronto.test.js
+
+Abre o app no Chromium (playwright), carrega fechamentos `.xlsx` gerados no próprio
+teste e confere cada serviço contra a fórmula do app de análise de obras pagas:
+valor = diferença de quantidade × unitário pago, pago a mais e pago sem apontamento
+abatendo do pendente.

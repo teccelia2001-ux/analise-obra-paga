@@ -40,11 +40,11 @@ function fechamento(obra,itens,comValor,opc={}){
     for(const it of its.filter(x=>x.op===op)){
       const r=rows.length+1;
       let c=n("B"+r,it.cod)+s("D"+r,it.desc)+n("E"+r,it.qtd);
-      if(comValor==="formula") c+=n("F"+r,it.unit)+`<c r="G${r}" s="2"><f>E${r}*F${r}</f><v>${it.qtd*it.unit}</v></c>`;
+      if(comValor==="formula") c+=n("F"+r,it.unit)+(it.semTotal?"":`<c r="G${r}" s="2"><f>E${r}*F${r}</f><v>${it.qtd*it.unit}</v></c>`);
       rows.push(c);
     }
   }
-  if(opc.total){ const r=rows.length+2, t=its.reduce((a,x)=>a+x.qtd*x.unit,0);
+  if(opc.total){ const r=rows.length+2, t=its.filter(x=>!x.semTotal&&!x.foraDoTotal).reduce((a,x)=>a+x.qtd*x.unit,0);
     rows.push(""); rows.push(s("B"+r,"ENGENHARIA")); rows.push(s("A"+(r+1),"R$")+`<c r="B${r+1}" s="3"><f>SUM(G6:G${r-2})</f><v>${t}</v></c>`); }
   return `<?xml version="1.0"?><worksheet><sheetData>${rows.map((c,i)=>c?`<row r="${i+1}">${c}</row>`:"").join("")}</sheetData></worksheet>`;
   };
@@ -240,6 +240,23 @@ const perto=(a,b)=>Math.abs(a-b)<0.006;
     const r=await pg.evaluate(()=>({aba:APONT.aba,soma:APONT.itens.reduce((s,x)=>s+x.vlr,0)}));
     ok(r.aba==="FECHAMENTO",`aba lida: ${r.aba}`);
     ok(perto(r.soma,APONT.reduce((s,x)=>s+x.qtd*x.unit,0)),`soma da aba certa: ${r.soma.toFixed(2)}`);
+    await pg.close(); }
+
+  console.log("\n10) Linhas lidas ≠ total da planilha: o app aponta a linha culpada");
+  { const pg=await abrir();
+    const its=[...APONT,{op:"R",cod:"64000",desc:"RETIRADA DE TOCO",qtd:3,unit:802.837,foraDoTotal:true}];
+    await carregar(pg,fechamento(OBRA,its,"formula",{total:true}),[MEDICAO]);
+    let txt=await pg.locator("#avisoConf").innerText();
+    ok(/as linhas lidas da planilha somam/.test(txt),"aviso de linhas lidas ≠ total");
+    ok(/a diferença é exatamente o valor de: linha \d+ do Excel — retirar 64000 RETIRADA DE TOCO/.test(txt),"SOMA que não pega a última linha: aponta a linha 64000");
+    await pg.close(); }
+  { const pg=await abrir();
+    const its=[...APONT,{op:"I",cod:"60999",desc:"PODA SEM TOTAL",qtd:2,unit:150,semTotal:true}];
+    await carregar(pg,fechamento(OBRA,its,"formula",{total:true}),[MEDICAO]);
+    const txt=await pg.locator("#avisoConf").innerText();
+    ok(/= a diferença · 1 linha\(s\) sem valor na coluna de total.*60999/.test(txt),"célula de total vazia: aponta a linha 60999");
+    await pg.click("#btnLido");
+    ok(/linha \d+ · I 60999 PODA SEM TOTAL .*sem valor na planilha/.test(await pg.locator("#bruto").innerText()),"O que foi lido mostra o nº da linha do Excel");
     await pg.close(); }
 
   await b.close();

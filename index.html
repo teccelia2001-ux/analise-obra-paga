@@ -629,9 +629,21 @@ async function lerXLSX(arquivo){
   const L=[];
   for(const m of sh.matchAll(/<row[^>]*r="(\d+)"[^>]*>([\s\S]*?)<\/row>/g)){
     const c={};
-    for(const cel of m[2].matchAll(/<c r="([A-Z]+)\d+"([^>]*)>(?:<v>([\s\S]*?)<\/v>|<is>[\s\S]*?<t[^>]*>([\s\S]*?)<\/t>[\s\S]*?<\/is>)?<\/c>/g)){
-      const v = cel[4]!==undefined? cel[4] : (cel[3]===undefined? "" : (/t="s"/.test(cel[2]||"")? S[+cel[3]] : cel[3]));
-      if(v!=="") c[cel[1]]=v;
+    /* a célula pode trazer fórmula (<f>) antes do valor calculado (<v>) — o
+       total da linha costuma ser =qtd*unitário — ou vir vazia (<c .../>) */
+    for(const cel of m[2].matchAll(/<c\b([^>]*?)(?:\/>|>([\s\S]*?)<\/c>)/g)){
+      const at=cel[1]||"", ref=(at.match(/\br="([A-Z]+)\d+"/)||[])[1]; if(!ref) continue;
+      const dentro=cel[2]||"", tipo=(at.match(/\bt="(\w+)"/)||[])[1]||"";
+      const vv=dentro.match(/<v>([\s\S]*?)<\/v>/);
+      let v;
+      if(tipo==="inlineStr") v=[...dentro.matchAll(/<t[^>]*>([\s\S]*?)<\/t>/g)].map(x=>x[1]).join("");
+      else if(!vv) v="";
+      else if(tipo==="s") v=S[+vv[1]]??"";
+      else if(tipo==="str") v=vv[1];
+      else if(tipo===""||tipo==="n"){ const n=parseFloat(vv[1]); v=isNaN(n)?vv[1]:n }  /* número cru do Excel: ponto é decimal */
+      else v=vv[1];
+      if(typeof v==="string") v=v.replace(/&amp;/g,"&").replace(/&lt;/g,"<").replace(/&gt;/g,">").replace(/&quot;/g,'"').replace(/&#39;/g,"'");
+      if(v!=="") c[ref]=v;
     }
     if(Object.keys(c).length) L.push(c);
   }
@@ -669,7 +681,8 @@ async function lerXLSX(arquivo){
     const cod=c[COL.cod]===undefined?"":String(c[COL.cod]).trim();
     if(!ehCodigo(cod) || c[COL.qtd]===undefined) continue;
     reg.itens.push({op:sec||"?",cod,desc:String(c[COL.desc]||"").trim(),
-      qtd:num(c[COL.qtd]), unit:num(c[COL.unit]), vlr:num(c[COL.vlr])});
+      qtd:num(c[COL.qtd]), unit:num(c[COL.unit]),
+      vlr:num(c[COL.vlr])||Math.round(num(c[COL.qtd])*num(c[COL.unit])*100)/100});
   }
   if(!reg.itens.length) reg.avisos.push(`a planilha tem ${L.length} linhas, mas nenhuma virou serviço (colunas ${COL.cod}/${COL.qtd})`);
   return reg;
@@ -727,13 +740,18 @@ function confronto(){
     const [op,cod]=k.split("|");
     const A=ap.get(k)||{qtd:0,vlr:0,unit:0}, P=pg.get(k)||{qtd:0,vlr:0,unit:0};
     /* valor unitário de cada lado, para recalcular quando a quantidade é corrigida */
-    const unitA=A.qtd? A.vlr/A.qtd : (A.unit||0);
-    const unitP=P.qtd? P.vlr/P.qtd : (P.unit||0);
+    const unitA=(A.qtd&&A.vlr)? A.vlr/A.qtd : (A.unit||0);
+    const unitP=(P.qtd&&P.vlr)? P.vlr/P.qtd : (P.unit||0);
+    /* preço do serviço: o da medição (o que a Energisa paga); sem ele, o do apontado */
+    const unit=unitP||unitA;
     const ed=EDICOES[k]||{};
     const cent=n=>Math.round(n*100)/100;
     let qa=A.qtd, qp=P.qtd, va=A.vlr, vp=P.vlr;
-    if(ed.qa!==undefined){ qa=ed.qa; va=cent(qa*(unitA||unitP)) }
-    if(ed.qp!==undefined){ qp=ed.qp; vp=cent(qp*(unitP||unitA)) }
+    if(ed.qa!==undefined) qa=ed.qa;
+    if(ed.qp!==undefined) qp=ed.qp;
+    /* lado sem valor (ou quantidade corrigida): quantidade × unitário */
+    if(ed.qa!==undefined||(!va&&qa)) va=cent(qa*(unitA||unitP));
+    if(ed.qp!==undefined||(!vp&&qp)) vp=cent(qp*(unitP||unitA));
     let sit;
     if(qa>0 && qp===0) sit="Pendente de pagamento";
     else if(qa>qp && qp>0) sit="Pagamento parcial";
@@ -741,7 +759,7 @@ function confronto(){
     else if(qa===0 && qp>0) sit="Pago sem apontamento";
     else sit="Conferido";
     out.push({op,cod,serv:(add.has(k)&&(ADICIONADOS.find(i=>i.op===op&&i.cod===cod)||{}).serv)||desc.get(cod)||"",qa,qp,dif:cent(qa-qp),
-      va,vp,vdif:cent(va-vp),unit:unitA||unitP,sit,
+      va,vp,vdif:cent((qa-qp)*unit),unit,sit,
       editado:ed.qa!==undefined||ed.qp!==undefined, inativo:INATIVOS.has(k), acrescentado:add.has(k)});
   }
   return out;

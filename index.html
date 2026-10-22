@@ -449,10 +449,29 @@ function acharStreams(bytes){
     if(s[ini]==="\n") ini++;
     const fim=s.indexOf("endstream",ini);
     if(fim<0) break;
-    out.push(bytes.subarray(ini,fim));
+    /* nº do objeto dono do stream, para saber de que página ele é */
+    const dono=[...s.slice(i,p).matchAll(/(\d+)\s+\d+\s+obj\b/g)].pop();
+    out.push(Object.assign(bytes.subarray(ini,fim),{obj:dono?+dono[1]:null}));
     i=fim+9;
   }
   return out;
+}
+
+/* objeto do conteúdo → nº da página. Cada página desenha nas mesmas coordenadas;
+   sem separar, a linha da página 1 se mistura com a da página 2 de mesma altura.
+   Ordem das páginas pelo /Kids; sem achar, pela ordem no arquivo. */
+function paginasDoPdf(bytes){
+  const s=LATIN.decode(bytes), refs=t=>[...t.matchAll(/(\d+)\s+\d+\s+R/g)].map(m=>+m[1]);
+  const kids=[]; for(const m of s.matchAll(/\/Kids\s*\[([^\]]*)\]/g)) kids.push(...refs(m[1]));
+  const pags=[];
+  for(const m of s.matchAll(/(\d+)\s+\d+\s+obj\s*<<([\s\S]*?)endobj/g)){
+    if(!/\/Type\s*\/Page\b(?!s)/.test(m[2])) continue;
+    const c=m[2].match(/\/Contents\s*(\[[^\]]*\]|\d+\s+\d+\s+R)/);
+    if(c) pags.push({obj:+m[1],cont:refs(c[1])});
+  }
+  pags.sort((a,b)=>{const ia=kids.indexOf(a.obj),ib=kids.indexOf(b.obj);return (ia<0?1e9:ia)-(ib<0?1e9:ib)});
+  const mapa=new Map(); pags.forEach((p,k)=>p.cont.forEach(o=>mapa.set(o,k)));
+  return mapa;
 }
 
 /* <0044> <0061> → glifo 0x44 vale "a" */
@@ -483,7 +502,7 @@ const mul=(a,b)=>[a[0]*b[0]+a[1]*b[2], a[0]*b[1]+a[1]*b[3],
                   a[2]*b[0]+a[3]*b[2], a[2]*b[1]+a[3]*b[3],
                   a[4]*b[0]+a[5]*b[2]+b[4], a[4]*b[1]+a[5]*b[3]+b[5]];
 
-function textoDoConteudo(cont,mapa){
+function textoDoConteudo(cont,mapa,pg=0){
   const frag=[];
   let ctm=[1,0,0,1,0,0], pilha=[], tm=[1,0,0,1,0,0], tlm=[1,0,0,1,0,0], leading=0;
   const re=/(q|Q|BT|ET|T\*)\s|((?:-?[\d.]+\s+){6})cm|((?:-?[\d.]+\s+){6})Tm|(-?[\d.]+)\s+(-?[\d.]+)\s+(TD|Td)|(-?[\d.]+)\s+TL|\[([\s\S]*?)\]\s*TJ|<([0-9A-Fa-f\s]*)>\s*Tj|\(((?:\\.|[^)\\])*)\)\s*Tj/g;
@@ -514,7 +533,7 @@ function textoDoConteudo(cont,mapa){
     }
     if(!txt.trim()) continue;
     const M=mul(tm,ctm);
-    frag.push({x:M[4],y:M[5],t:txt});
+    frag.push({x:M[4],y:M[5],t:txt,pg});
   }
   return frag;
 }
@@ -529,12 +548,12 @@ function decodifica(hex,mapa){
 
 /* junta os pedaços em linhas: mesma altura = mesma linha, depois ordena pela esquerda */
 function emLinhas(frag){
-  const ord=frag.map((f,i)=>({...f,i})).sort((a,b)=> b.y-a.y || a.x-b.x || a.i-b.i);
+  const ord=frag.map((f,i)=>({...f,i})).sort((a,b)=> (a.pg||0)-(b.pg||0) || b.y-a.y || a.x-b.x || a.i-b.i);
   const linhas=[];
   for(const f of ord){
     const ult=linhas[linhas.length-1];
-    if(ult && Math.abs(ult.y-f.y)<=2.2){ ult.cels.push(f); ult.y=(ult.y+f.y)/2 }
-    else linhas.push({y:f.y,cels:[f]});
+    if(ult && ult.pg===(f.pg||0) && Math.abs(ult.y-f.y)<=2.2){ ult.cels.push(f); ult.y=(ult.y+f.y)/2 }
+    else linhas.push({y:f.y,pg:f.pg||0,cels:[f]});
   }
   for(const l of linhas){ l.cels.sort((a,b)=>a.x-b.x || a.i-b.i); l.txt=l.cels.map(c=>c.t.trim()).join(" ") }
   return linhas;
@@ -543,15 +562,17 @@ function emLinhas(frag){
 async function lerPDF(arquivo){
   const bytes=new Uint8Array(await arquivo.arrayBuffer());
   const mapa=new Map(); const conteudos=[];
+  const pagDe=paginasDoPdf(bytes); let semPag=pagDe.size;
   for(const s of acharStreams(bytes)){
     let d=await inflarStreamPdf(s);
     let txt=LATIN.decode(d||s);
     if(/beginbfchar|beginbfrange/.test(txt)) lerCMap(txt,mapa);
-    if(/\bTJ\b|\bTj\b/.test(txt) && /\bTf\b/.test(txt)) conteudos.push(txt);
+    if(/\bTJ\b|\bTj\b/.test(txt) && /\bTf\b/.test(txt))
+      conteudos.push({txt,pg:pagDe.has(s.obj)?pagDe.get(s.obj):semPag++});
   }
   if(!conteudos.length) throw new Error("não achei o texto dentro do PDF (arquivo digitalizado ou protegido?)");
   const frag=[];
-  for(const c of conteudos) frag.push(...textoDoConteudo(c,mapa));
+  for(const c of conteudos) frag.push(...textoDoConteudo(c.txt,mapa,c.pg));
   const linhas=emLinhas(frag);
 
   const reg={arquivo:arquivo.name,glifos:mapa.size,linhas:linhas.length,itens:[],cab:{},totais:{},avisos:[]};
@@ -936,18 +957,20 @@ function conferenciaApontado(){
     else if(x.editado) parte.ed+=d; else parte.preco+=d;
   }
   const sin=v=>(v<0?"− ":"+ ")+brl(Math.abs(v));
+  /* o Excel soma unitários com mais casas do que mostra: 1 centavo é arredondamento */
+  const CENTAVO=0.015;
   const L=[];
-  if(totPlan>0&&Math.abs(lido-totPlan)>0.01)
+  if(totPlan>0&&Math.abs(lido-totPlan)>CENTAVO)
     L.push(...suspeitasPlanilha(lido-totPlan));
-  if(totPlan>0&&Math.abs(lido-totPlan)>0.01)
+  if(totPlan>0&&Math.abs(lido-totPlan)>CENTAVO)
     L.unshift(`<b>as linhas lidas da planilha somam ${brl(lido)}</b>, mas o total escrito nela é ${brl(totPlan)} (diferença ${sin(lido-totPlan)}) — confira em 🔍 O que foi lido se alguma linha ficou de fora ou entrou a mais (aba lida: <b>${esc(APONT.aba||"—")}</b>${APONT.abas&&APONT.abas.length>1?" de "+APONT.abas.map(esc).join(", "):""})`);
   if(Math.abs(parte.ed)>=0.01) L.push(`quantidades corrigidas à mão: ${sin(parte.ed)}`);
   if(Math.abs(parte.add)>=0.01) L.push(`serviços acrescentados à mão: ${sin(parte.add)}`);
   if(Math.abs(parte.inat)>=0.01) L.push(`serviços desativados: ${sin(parte.inat)}`);
   if(Math.abs(parte.preco)>=0.01) L.push(`linhas sem valor na planilha, calculadas pelo preço pago: ${sin(parte.preco)}`);
   const ref=totPlan>0?totPlan:lido;
-  if(Math.abs(card-ref)<0.01&&!L.length)
-    return totPlan>0?` <span style="color:var(--ok-txt)">✔ Apontado confere com o total da planilha (${brl(totPlan)}).</span>`:"";
+  if(Math.abs(card-ref)<CENTAVO&&!L.length)
+    return totPlan>0?` <span style="color:var(--ok-txt)">✔ Apontado confere com o total da planilha (${brl(totPlan)}${Math.abs(card-ref)>=0.005?" — 1 centavo de arredondamento do Excel":""}).</span>`:"";
   return `<div class="avisoSusp" style="margin-top:8px">⚠️ <b>Apontado na tela ${brl(card)} × planilha ${brl(ref)}</b>${
     totPlan>0?"":" (soma das linhas — a planilha não traz um total que o app reconheça)"}:<br>· ${L.join("<br>· ")}${
     parte.ed||parte.add||parte.inat?'<br>Para voltar ao apontado original use <b>↺ Restaurar obra</b>.':""}</div>`;
@@ -969,7 +992,7 @@ function suspeitasPlanilha(dif){
   if(sem.length) out.push(`${perto(soma(sem))?"<b>= a diferença</b> · ":""}${sem.length} linha(s) <b>sem valor na coluna de total</b> — o app calculou quantidade × unitário, mas a planilha pode estar contando zero: ${sem.map(rot).join("; ")}`);
   const fora=its.filter(x=>x.op==="?");
   if(fora.length) out.push(`${perto(soma(fora))?"<b>= a diferença</b> · ":""}${fora.length} linha(s) fora das seções INSTALAR/RETIRAR: ${fora.map(rot).join("; ")}`);
-  if(APONT.linhaTotal){
+  if(APONT.linhaTotal && its.some(x=>x.linha<APONT.linhaTotal)){
     const dep=its.filter(x=>x.linha>APONT.linhaTotal);
     if(dep.length) out.push(`${perto(soma(dep))?"<b>= a diferença</b> · ":""}${dep.length} linha(s) <b>abaixo do total</b> (linha ${APONT.linhaTotal}), que a planilha não soma: ${dep.map(rot).join("; ")}`);
   }
@@ -1063,7 +1086,7 @@ function vistaConfronto(){
   const ficha=`<div class="fhead"><div>
       <div class="fnum">Obra ${num} <button class="btnCopiar" data-copiar="${num}" title="Copiar número da obra">📋</button></div>
       <div class="fdesc">${esc(a.local||"")}${p.endereco?(a.local?" · ":"")+esc(p.endereco):""}${p.municipioNome?" · "+esc(p.municipioNome):""}</div>
-      ${obraPaga()&&obraApont()!=="—"?`<div class="avisoSusp">⚠️ <b>Confira se é a mesma obra:</b> a planilha é da obra <b>${esc(obraApont())}</b> (numeração Teccel) e a medição traz <b>${esc(obraPaga())}</b> (numeração Energisa). O app não tem como cruzar as duas.</div>`:""}
+      ${obraPaga()&&obraApont()!=="—"&&obraPaga().replace(/\D/g,"")!==obraApont().replace(/\D/g,"")?`<div class="avisoSusp">⚠️ <b>Confira se é a mesma obra:</b> a planilha é da obra <b>${esc(obraApont())}</b> (numeração Teccel) e a medição traz <b>${esc(obraPaga())}</b> (numeração Energisa). O app não tem como cruzar as duas.</div>`:""}
       ${p.empreiteira?`<div class="fdesc" style="margin-top:2px">👷 ${esc(p.empreiteira)}${p.contrato?` · contrato <b>${esc(p.contrato)}</b>`:""}</div>`:""}
       <div style="margin-top:6px">
         <span class="tag c-novo">Medição ${esc(p.obra||"—")}</span>
